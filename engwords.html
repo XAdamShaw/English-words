@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>一万英语高频词</title>
+  <style>
+    :root{
+      --accent: #246bfd;
+      --muted: #6b7280;
+      --card-bg: rgba(255,255,255,0.06);
+      --card-radius: 12px;
+      --gap: 16px;
+      --star-yellow: #fbbf24;
+      --text-light: #fff;
+      --text-dark: #0f172a;
+    }
+
+    /* Reset + base */
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial}
+    body{background:linear-gradient(135deg,#4A90E2,#9013FE);background-attachment:fixed;color:var(--text-light);transition:background .35s,color .35s}
+
+    .wrap{max-width:1100px;margin:20px auto;padding:12px}
+    header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+
+    /* Left controls */
+    .left-controls{display:flex;gap:8px;align-items:center}
+    .btn{background:var(--accent);color:#fff;border:none;padding:8px 12px;border-radius:10px;cursor:pointer}
+    .ghost{background:transparent;color:var(--text-light);border:1px solid rgba(255,255,255,0.12)}
+    input[type=file]{display:none}
+
+    /* Background selector (color blocks) */
+    .bg-picker{display:flex;gap:8px;align-items:center}
+    .bg-swatch{width:40px;height:32px;border-radius:8px;cursor:pointer;border:2px solid rgba(255,255,255,0.06)}
+    .bg-swatch:focus{outline:3px solid rgba(0,0,0,0.12)}
+
+    /* History modal */
+    .history-wrap{position:relative}
+    .history-list{position:fixed;background:var(--card-bg);backdrop-filter:blur(6px);border-radius:10px;padding:12px;width:max-content;min-width:320px;max-width:calc(100vw - 200px);max-height:500px;overflow-y:auto;box-shadow:0 10px 30px rgba(2,6,23,0.35);z-index:50;color:inherit}
+    .history-item{display:flex;align-items:center;justify-content:space-between;padding:8px;border-radius:8px}
+    .history-item .name{flex:1;word-break:break-word;padding-right:12px}
+    .history-item:hover{background:rgba(255,255,255,0.04)}
+
+    /* Main area */
+    main{margin-top:16px}
+    .cards{display:flex;flex-direction:column;gap:20px}
+
+    .card{
+      display:grid;
+      grid-template-columns:1fr 120px;
+      gap:12px;align-items:start;padding:14px;border-radius:var(--card-radius);background:var(--card-bg);box-shadow:0 6px 18px rgba(2,6,23,0.18);transition:transform .12s
+    }
+    .card:hover{transform:translateY(-4px)}
+    .card-body{display:flex;flex-direction:column;gap:8px}
+    .field{white-space:pre-wrap;word-break:break-word;font-size:15px;line-height:1.45;color:inherit}
+    .row-header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:4px}
+    .row-number{font-size:13px;color:var(--muted);font-weight:600}
+    .col-first{font-size:11px;color:var(--muted);font-weight:500;flex:1;text-align:right}
+    .cols-23{white-space:pre;font-size:15px;line-height:1.45;color:inherit}
+
+    /* right column: stars + freq */
+    .card-side{display:flex;flex-direction:column;align-items:center;gap:12px}
+    .stars{display:flex;gap:6px}
+    .star{font-size:20px;cursor:pointer;user-select:none;color:rgba(255,255,255,0.45)}
+    .star.active{color:var(--star-yellow);opacity:1}
+
+    .freq{font-size:13px;color:var(--muted);align-self:flex-start}
+
+    .card-actions{display:flex;gap:8px;align-items:center;width:100%;justify-content:flex-start}
+    .reset{background:transparent;border:1px solid rgba(255,255,255,0.12);padding:6px 8px;border-radius:6px;color:inherit;font-size:13px;cursor:pointer}
+
+    /* Empty state */
+    .empty{padding:40px;text-align:center;color:var(--muted)}
+
+    /* Responsive */
+    @media(max-width:820px){
+      .card{grid-template-columns:1fr 96px}
+      .history-list{min-width:320px}
+    }
+    @media(max-width:520px){
+      header{flex-direction:column;align-items:stretch}
+      .card{grid-template-columns:1fr 88px}
+      .card-side{align-items:flex-end}
+    }
+
+    /* utility */
+    .small{font-size:13px;color:var(--muted)}
+    .top-row{display:flex;align-items:center;gap:12px}
+
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="left-controls">
+        <label class="btn">选择 CSV
+          <input id="fileInput" type="file" accept=".csv,text/csv" />
+        </label>
+
+        <div class="history-wrap">
+          <button id="historyBtn" class="ghost">CSV 历史 ▾</button>
+          <div id="historyList" class="history-list" style="display:none"></div>
+        </div>
+      </div>
+
+      <div class="bg-picker" title="切换背景（点击色块）">
+        <div class="small">背景：</div>
+        <div class="bg-swatch" data-index="0" id="sw0" style="background:linear-gradient(135deg,#4A90E2,#9013FE)"></div>
+        <div class="bg-swatch" data-index="1" id="sw1" style="background:#ffffff;border:1px solid #e5e7eb"></div>
+        <div class="bg-swatch" data-index="2" id="sw2" style="background:#e5e7eb"></div>
+        <div class="bg-swatch" data-index="3" id="sw3" style="background:#0f172a"></div>
+      </div>
+    </header>
+
+    <main>
+      <div id="cards" class="cards">
+        <div id="empty" class="empty">尚未加载任何 CSV。点击“选择 CSV”上传文件，或者从历史中选择已上传的文件。</div>
+      </div>
+    </main>
+  </div>
+
+<script>
+  /* ---------- Storage helpers ---------- */
+  const HISTORY_KEY = 'csv_history_v2';
+  function saveJSON(k,v){localStorage.setItem(k,JSON.stringify(v));}
+  function loadJSON(k,def=null){try{const s=localStorage.getItem(k);return s?JSON.parse(s):def;}catch(e){return def}}
+
+  /* ---------- CSV parsing (robust) ---------- */
+  function parseCSV(text){
+    // RFC-style simple parser handling quoted fields
+    const rows=[];
+    let cur=''; let row=[]; let inQ=false;
+    for(let i=0;i<text.length;i++){
+      const ch=text[i];
+      if(inQ){
+        if(ch==='"'){
+          if(text[i+1]==='"'){cur+='"'; i++;} else {inQ=false}
+        } else cur+=ch;
+      } else {
+        if(ch==='"'){inQ=true;}
+        else if(ch===','){row.push(cur); cur='';}
+        else if(ch==='\r'){continue;}
+        else if(ch==='\n'){row.push(cur); rows.push(row); row=[]; cur='';}
+        else cur+=ch;
+      }
+    }
+    if(cur!=='' || row.length>0){row.push(cur); rows.push(row)}
+    // remove empty trailing rows
+    return rows.filter(r=>r.some(c=>c!==''));
+  }
+
+  function rowId(filename,row){ // stable id per row content
+    const s = JSON.stringify(row);
+    let h = 2166136261 >>> 0;
+    for(let i=0;i<s.length;i++) h = (h ^ s.charCodeAt(i)) * 16777619 >>> 0;
+    return filename + '_r_' + h.toString(16);
+  }
+
+  /* ---------- App state ---------- */
+  let currentFile = null;
+  let rows = []; // array of arrays
+  let ratings = {}; // id -> 0..5
+
+  const fileInput = document.getElementById('fileInput');
+  const cardsEl = document.getElementById('cards');
+  const emptyEl = document.getElementById('empty');
+  const historyBtn = document.getElementById('historyBtn');
+  const historyList = document.getElementById('historyList');
+
+  /* ---------- History management ---------- */
+  function loadHistory(){return loadJSON(HISTORY_KEY,[])}
+  function saveHistory(h){saveJSON(HISTORY_KEY,h)}
+  function addHistory(name){let h=loadHistory(); if(!h.includes(name)){h.push(name); saveHistory(h)}}
+  function removeHistory(name){let h=loadHistory(); h=h.filter(x=>x!==name); saveHistory(h)}
+
+  function saveCsv(name,rows){saveJSON('csv_data_'+name,rows)}
+  function loadCsv(name){return loadJSON('csv_data_'+name,null)}
+  function saveRatings(name,ratings){saveJSON('csv_ratings_'+name,ratings)}
+  function loadRatings(name){return loadJSON('csv_ratings_'+name,{} )}
+
+  /* ---------- Render history dropdown ---------- */
+  function renderHistory(){
+    const h = loadHistory();
+    historyList.innerHTML='';
+    if(!h.length){historyList.innerHTML='<div class="small" style="padding:8px">无历史记录</div>';return}
+    // show newest first
+    h.slice().reverse().forEach(name=>{
+      const it = document.createElement('div'); it.className='history-item';
+      const left = document.createElement('div'); left.className='name'; left.textContent = name;
+      const right = document.createElement('div');
+      const loadBtn = document.createElement('button'); loadBtn.className='btn'; loadBtn.textContent='加载'; loadBtn.onclick=()=>{loadFromHistory(name); toggleHistory(false)};
+      const delBtn = document.createElement('button'); delBtn.className='reset'; delBtn.textContent='删除'; delBtn.onclick=()=>{ if(confirm('从历史中删除 "'+name+'" ? （不会删除评分）')){ removeHistory(name); renderHistory(); }};
+      right.appendChild(loadBtn); right.appendChild(delBtn);
+      it.appendChild(left); it.appendChild(right);
+      historyList.appendChild(it);
+    })
+  }
+
+  function toggleHistory(show){ 
+    if(show){
+      historyList.style.display = 'block';
+      renderHistory();
+      
+      // Calculate position dynamically
+      const btnRect = historyBtn.getBoundingClientRect();
+      const listRect = historyList.getBoundingClientRect();
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      
+      // Position below button
+      let top = btnRect.bottom + 8;
+      let left = btnRect.left;
+      
+      // Ensure at least 100px from left edge
+      if(left < 100){
+        left = 100;
+      }
+      
+      // Ensure at least 100px from right edge
+      if(left + listRect.width > viewportWidth - 100){
+        left = viewportWidth - listRect.width - 100;
+      }
+      
+      // Ensure doesn't overflow bottom
+      if(top + listRect.height > viewportHeight - 20){
+        top = btnRect.top - listRect.height - 8;
+      }
+      
+      historyList.style.top = top + 'px';
+      historyList.style.left = left + 'px';
+    } else {
+      historyList.style.display = 'none';
+    }
+  }
+  
+  historyBtn.addEventListener('click', e=>{ toggleHistory(historyList.style.display==='none'); });
+  document.addEventListener('click', e=>{ if(!e.composedPath().includes(historyList) && e.target !== historyBtn) toggleHistory(false); })
+  
+  // Recalculate position on window resize
+  window.addEventListener('resize', ()=>{ if(historyList.style.display === 'block') toggleHistory(true); })
+
+  /* ---------- File input handling ---------- */
+  fileInput.addEventListener('change', async e=>{
+    const f = e.target.files && e.target.files[0];
+    if(!f) return;
+    const text = await f.text();
+    const parsed = parseCSV(text);
+    const name = f.name;
+    saveCsv(name, parsed);
+    addHistory(name);
+    loadFile(name, parsed);
+  });
+
+  function loadFromHistory(name){ const data = loadCsv(name); if(!data){ alert('历史中未保存该文件的内容，请重新上传'); return; } loadFile(name,data); }
+
+  function loadFile(name,data){ currentFile = name; rows = data; ratings = loadRatings(name) || {}; renderCards(); }
+
+  /* ---------- Rendering cards ---------- */
+  function renderCards(){
+    const startTime = performance.now();
+    cardsEl.innerHTML='';
+    if(!rows || !rows.length){ emptyEl.style.display='block'; return; } else emptyEl.style.display='none';
+
+    // Skip first row (header) if exists
+    const dataRows = rows.length > 1 ? rows.slice(1) : rows;
+
+    // Build items: for each CSV row -> card. Each field displayed in its own row.
+    const items = dataRows.map((r,idx)=>({
+      idx, row:r, id: rowId(currentFile||'nofile', r)
+    }));
+
+    // ensure ratings default
+    items.forEach(it=>{ if(ratings[it.id]===undefined) ratings[it.id]=0; });
+
+    // sort by rating desc, then idx
+    items.sort((a,b)=> (ratings[b.id]||0)-(ratings[a.id]||0) || a.idx-b.idx );
+
+    // Use DocumentFragment for better performance
+    const fragment = document.createDocumentFragment();
+
+    items.forEach(it=>{
+      const card = document.createElement('div'); card.className='card';
+      
+      // left: content
+      const body = document.createElement('div'); body.className='card-body';
+      
+      // Helper function to get cell value with fallback
+      const getCell = (index) => {
+        const val = it.row[index];
+        if(val === undefined || val === null || val === ''){
+          console.warn(`CSV数据异常：第${it.idx+1}行第${index+1}列数据缺失`);
+          return '—';
+        }
+        return val;
+      };
+
+      // Row header: row number (left) + first column value (right)
+      const header = document.createElement('div'); header.className='row-header';
+      const rowNum = document.createElement('div'); rowNum.className='row-number'; rowNum.textContent = `#${it.idx + 1}`;
+      const colFirst = document.createElement('div'); colFirst.className='col-first'; colFirst.textContent = getCell(0);
+      header.appendChild(rowNum); header.appendChild(colFirst);
+      body.appendChild(header);
+
+      // Columns 2 & 3 on same line with 4 spaces
+      if(it.row.length > 1){
+        const cols23 = document.createElement('div'); cols23.className='cols-23';
+        const col2 = getCell(1);
+        const col3 = it.row.length > 2 ? getCell(2) : '';
+        cols23.textContent = col3 ? `${col2}    ${col3}` : col2;
+        body.appendChild(cols23);
+      }
+
+      // Remaining columns (4+)
+      for(let i=3; i<it.row.length; i++){
+        const fld = document.createElement('div'); fld.className='field'; fld.textContent = getCell(i);
+        body.appendChild(fld);
+      }
+
+      // right: stars
+      const side = document.createElement('div'); side.className='card-side';
+      const starsWrap = document.createElement('div'); starsWrap.className='stars';
+      const cur = ratings[it.id] || 0;
+      for(let s=1;s<=5;s++){
+        const sp = document.createElement('span'); sp.className='star' + (s<=cur? ' active':''); sp.textContent='★'; sp.dataset.value = s;
+        sp.title = s + ' 星';
+        sp.addEventListener('click', ()=>{ setRating(it.id,s); });
+        starsWrap.appendChild(sp);
+      }
+      // allow clicking empty area to set 0
+      const zero = document.createElement('div'); zero.className='small'; zero.style.cursor='pointer'; zero.style.marginTop='4px'; zero.textContent='取消'; zero.addEventListener('click', ()=>{ if(confirm('确认要将该项评分重置为 0 吗？')) setRating(it.id,0); });
+      side.appendChild(starsWrap); side.appendChild(zero);
+
+      card.appendChild(body); card.appendChild(side);
+      fragment.appendChild(card);
+    });
+
+    // Batch insert all cards at once for better performance
+    cardsEl.appendChild(fragment);
+
+    // persist ratings immediately
+    if(currentFile) saveRatings(currentFile, ratings);
+
+    // Performance logging
+    const renderTime = performance.now() - startTime;
+    console.log(`渲染完成：${items.length} 条数据，耗时 ${renderTime.toFixed(2)}ms`);
+    if(renderTime > 200 && items.length >= 1000){
+      console.warn(`性能警告：渲染 ${items.length} 条数据耗时超过 200ms`);
+    }
+  }
+
+  function setRating(id,val){ ratings[id]=val; if(currentFile) saveRatings(currentFile,ratings); renderCards(); }
+
+  /* ---------- Load last opened file on start if exists ---------- */
+  (function init(){
+    const h = loadHistory();
+    if(h && h.length){ const last = h[h.length-1]; const data = loadCsv(last); if(data){ loadFile(last,data); }}
+  })();
+
+  /* ---------- Background switching (color blocks) ---------- */
+  const sw0 = document.getElementById('sw0');
+  const sw1 = document.getElementById('sw1');
+  const sw2 = document.getElementById('sw2');
+  const sw3 = document.getElementById('sw3');
+
+  function applyTheme(index){
+    if(index===0){ document.body.style.background='linear-gradient(135deg,#4A90E2,#9013FE)'; document.body.style.backgroundAttachment='fixed'; document.body.style.color='var(--text-light)'; }
+    if(index===1){ document.body.style.background='#ffffff'; document.body.style.backgroundAttachment='fixed'; document.body.style.color='var(--text-dark)'; }
+    if(index===2){ document.body.style.background='#e5e7eb'; document.body.style.backgroundAttachment='fixed'; document.body.style.color='var(--text-dark)'; }
+    if(index===3){ document.body.style.background='#0f172a'; document.body.style.backgroundAttachment='fixed'; document.body.style.color='var(--text-light)'; }
+    // adjust CSS variables for cards readability
+    const isLight = (index===1||index===2);
+    document.documentElement.style.setProperty('--card-bg', isLight? 'rgba(255,255,255,0.9)': 'rgba(0,0,0,0.36)');
+    document.documentElement.style.setProperty('--muted', isLight? '#4b5563':'#9aa4b2');
+    // force re-render to update text colors in cards
+    renderCards();
+    // save theme
+    localStorage.setItem('csv_theme_v1', index);
+  }
+  sw0.addEventListener('click', ()=>applyTheme(0));
+  sw1.addEventListener('click', ()=>applyTheme(1));
+  sw2.addEventListener('click', ()=>applyTheme(2));
+  sw3.addEventListener('click', ()=>applyTheme(3));
+
+  // restore saved theme
+  const savedTheme = localStorage.getItem('csv_theme_v1'); if(savedTheme!==null) applyTheme(Number(savedTheme));
+
+  /* ---------- utility save/load wrapper ---------- */
+  function saveRatings(name, obj){ saveJSON('csv_ratings_'+name, obj); }
+  function loadRatings(name){ return loadJSON('csv_ratings_'+name, {} ); }
+
+</script>
+</body>
+</html>
