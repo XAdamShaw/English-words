@@ -81,6 +81,122 @@ let currentRowNum = 1; // Current displayed row number
 let totalRows = 0; // Total data rows (excluding header)
 let scrollAnimationId = null; // For interrupting ongoing scroll animations
 let isViewsHidden = false; // Track visibility state of fixed views
+let isSpeechSupported = false; // Track if SpeechSynthesis API is supported
+let currentSpeechButton = null; // Track currently speaking button
+
+// ==================== Speech Synthesis Functions ====================
+/**
+ * Check if SpeechSynthesis API is supported
+ */
+function checkSpeechSupport() {
+  if ('speechSynthesis' in window) {
+    isSpeechSupported = true;
+    console.log('SpeechSynthesis API 已支持');
+    return true;
+  } else {
+    isSpeechSupported = false;
+    console.warn('SpeechSynthesis API not supported');
+    return false;
+  }
+}
+
+/**
+ * Speak text using SpeechSynthesis API
+ * @param {string} text - Text to speak
+ * @param {HTMLElement} button - Button element for visual feedback
+ */
+function speakText(text, button = null) {
+  if (!isSpeechSupported) {
+    console.warn('语音朗读功能不可用');
+    return;
+  }
+  
+  try {
+    // Validate input
+    if (!text || typeof text !== 'string' || text.trim() === '' || text === '—') {
+      console.log('无有效内容可朗读');
+      return;
+    }
+    
+    const startTime = performance.now();
+    
+    // Stop any ongoing speech
+    if (window.speechSynthesis.speaking) {
+      window.speechSynthesis.cancel();
+      
+      // Remove reading state from previous button
+      if (currentSpeechButton && currentSpeechButton !== button) {
+        currentSpeechButton.classList.remove('reading');
+      }
+    }
+    
+    // Create utterance
+    const utterance = new SpeechSynthesisUtterance(text);
+    
+    // Configure voice settings
+    utterance.lang = 'en-US'; // English pronunciation
+    utterance.rate = 0.9; // Slightly slower for clarity
+    utterance.pitch = 1.0;
+    utterance.volume = 1.0;
+    
+    // Event handlers
+    utterance.onstart = () => {
+      const responseTime = performance.now() - startTime;
+      console.log(`语音播放已启动，响应时间 ${responseTime.toFixed(2)}ms`);
+      
+      if (responseTime > 100) {
+        console.warn(`响应时间警告：启动耗时 ${responseTime.toFixed(2)}ms，超过 100ms 目标`);
+      }
+      
+      if (button) {
+        button.classList.add('reading');
+        currentSpeechButton = button;
+      }
+    };
+    
+    utterance.onend = () => {
+      console.log('语音播放已结束');
+      if (button) {
+        button.classList.remove('reading');
+      }
+      if (currentSpeechButton === button) {
+        currentSpeechButton = null;
+      }
+    };
+    
+    utterance.onerror = (event) => {
+      console.error('语音播放错误:', event.error);
+      if (button) {
+        button.classList.remove('reading');
+      }
+      if (currentSpeechButton === button) {
+        currentSpeechButton = null;
+      }
+    };
+    
+    // Start speaking
+    window.speechSynthesis.speak(utterance);
+    
+  } catch (error) {
+    console.error('speakText 函数执行异常:', error);
+    if (button) {
+      button.classList.remove('reading');
+    }
+  }
+}
+
+/**
+ * Stop current speech
+ */
+function stopSpeech() {
+  if (isSpeechSupported && window.speechSynthesis.speaking) {
+    window.speechSynthesis.cancel();
+    if (currentSpeechButton) {
+      currentSpeechButton.classList.remove('reading');
+      currentSpeechButton = null;
+    }
+  }
+}
 
 // ==================== DOM Elements ====================
 const fileInput = document.getElementById('fileInput');
@@ -588,12 +704,40 @@ function renderCards() {
     
     // Columns 2 & 3 on same line with 4 spaces
     if (it.row.length > 1) {
+      // Create wrapper for cols23 and speak button
+      const cols23Wrapper = document.createElement('div');
+      cols23Wrapper.className = 'cols-23-wrapper';
+      
       const cols23 = document.createElement('div');
       cols23.className = 'cols-23';
       const col2 = getCell(1);
       const col3 = it.row.length > 2 ? getCell(2) : '';
       cols23.textContent = col3 ? `${col2}    ${col3}` : col2;
-      body.appendChild(cols23);
+      cols23Wrapper.appendChild(cols23);
+      
+      // Add speech button after cols23 with 4 spaces gap
+      if (isSpeechSupported) {
+        const speakBtn = document.createElement('button');
+        speakBtn.className = 'speak-btn';
+        speakBtn.innerHTML = '🔊';
+        speakBtn.title = '朗读单词';
+        speakBtn.setAttribute('aria-label', '朗读');
+        
+        speakBtn.addEventListener('click', (e) => {
+          e.stopPropagation(); // Prevent card click events
+          
+          try {
+            const textToSpeak = getCell(1);
+            speakText(textToSpeak, speakBtn);
+          } catch (error) {
+            console.error('朗读按钮点击处理异常:', error);
+          }
+        });
+        
+        cols23Wrapper.appendChild(speakBtn);
+      }
+      
+      body.appendChild(cols23Wrapper);
     }
     
     // Remaining columns (4+)
@@ -781,6 +925,9 @@ sw2.addEventListener('click', () => applyTheme(2));
 sw3.addEventListener('click', () => applyTheme(3));
 
 // ==================== Initialization ====================
+// Check speech synthesis support
+checkSpeechSupport();
+
 // Restore saved view state
 restoreViewState();
 

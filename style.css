@@ -357,6 +357,12 @@ input[type=file] {
   text-align: right;
 }
 
+.cols-23-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 0.5em; /* Approximately 4 spaces width */
+}
+
 .cols-23 {
   white-space: pre;
   font-size: 15px;
@@ -457,6 +463,12 @@ input[type=file] {
     font-size: 12px;
     padding: 5px 10px;
   }
+  
+  .speak-btn {
+    width: 28px;
+    height: 28px;
+    font-size: 14px;
+  }
 }
 
 @media (max-width: 520px) {
@@ -520,6 +532,65 @@ input[type=file] {
   .bg-picker {
     flex-wrap: wrap;
   }
+  
+  .speak-btn {
+    width: 24px;
+    height: 24px;
+    font-size: 12px;
+  }
+}
+
+/* ==================== Speech Button ==================== */
+.speak-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(36, 107, 253, 0.1);
+  border: 1px solid rgba(36, 107, 253, 0.3);
+  border-radius: 6px;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  cursor: pointer;
+  font-size: 16px;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.speak-btn:hover {
+  background: rgba(36, 107, 253, 0.2);
+  border-color: rgba(36, 107, 253, 0.5);
+  transform: scale(1.05);
+}
+
+.speak-btn:active {
+  transform: scale(0.95);
+}
+
+.speak-btn.reading {
+  background: rgba(36, 107, 253, 0.3);
+  border-color: var(--accent);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.1);
+  }
+}
+
+/* Disabled state for unsupported browsers */
+.speak-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+  background: rgba(128, 128, 128, 0.1);
+  border-color: rgba(128, 128, 128, 0.2);
 }
 
 /* ==================== Utility Classes ==================== */
