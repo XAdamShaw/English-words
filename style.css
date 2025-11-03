@@ -1,0 +1,536 @@
+/* ==================== CSS Variables ==================== */
+:root {
+  --accent: #246bfd;
+  --muted: #6b7280;
+  --card-bg: rgba(255,255,255,0.06);
+  --card-radius: 12px;
+  --gap: 16px;
+  --star-yellow: #fbbf24;
+  --text-light: #fff;
+  --text-dark: #0f172a;
+}
+
+/* ==================== Reset + Base Styles ==================== */
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  margin: 0;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+}
+
+body {
+  background: linear-gradient(135deg, #4A90E2, #9013FE);
+  background-attachment: fixed;
+  color: var(--text-light);
+  transition: background 0.35s, color 0.35s;
+}
+
+.wrap {
+  max-width: 1100px;
+  margin: 20px auto;
+  padding: 12px;
+}
+
+/* ==================== Fixed Header Area ==================== */
+header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  background: rgba(0,0,0,0.25);
+  backdrop-filter: blur(10px);
+  padding: 12px 16px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+header.hidden {
+  opacity: 0;
+  transform: translateY(-100%);
+  pointer-events: none;
+}
+
+/* ==================== Fixed Scroll Control Area ==================== */
+.scroll-control {
+  position: fixed;
+  top: 56px;
+  left: 0;
+  right: 0;
+  z-index: 99;
+  background: rgba(0,0,0,0.2);
+  backdrop-filter: blur(8px);
+  padding: 10px 16px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  max-width: 100%;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.scroll-control.hidden {
+  opacity: 0;
+  transform: translateY(-100%);
+  pointer-events: none;
+}
+
+.scroll-control .slider-wrap {
+  flex: 1;
+  max-width: 500px;
+  min-width: 200px;
+}
+
+.scroll-control input[type=range] {
+  width: 100%;
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.2);
+  outline: none;
+  cursor: pointer;
+}
+
+.scroll-control input[type=range]:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.scroll-control .right-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 24px;
+}
+
+.scroll-control .row-info {
+  font-size: 14px;
+  color: var(--text-light);
+  white-space: nowrap;
+  min-width: 180px;
+  margin-right: 12px;
+}
+
+.scroll-control .jump-input {
+  width: 80px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.1);
+  color: var(--text-light);
+  font-size: 14px;
+  text-align: center;
+}
+
+.scroll-control .jump-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.scroll-control .jump-input.error {
+  border-color: #ef4444;
+  box-shadow: 0 0 0 2px rgba(239,68,68,0.2);
+}
+
+.scroll-control .go-btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 6px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.scroll-control .go-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+  background: #6b7280;
+}
+
+/* ==================== Hide/Show Toggle Buttons ==================== */
+.toggle-view-btn {
+  background: rgba(255,255,255,0.15);
+  color: var(--text-light);
+  border: 1px solid rgba(255,255,255,0.2);
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.toggle-view-btn:hover {
+  background: rgba(255,255,255,0.25);
+  opacity: 0.9;
+}
+
+.floating-toggle-btn {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(8px);
+  border: 2px solid rgba(255,255,255,0.3);
+  color: #fff;
+  font-size: 20px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 200;
+  opacity: 0.6;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+.floating-toggle-btn:hover {
+  opacity: 0.9;
+  transform: scale(1.05);
+}
+
+.floating-toggle-btn.visible {
+  display: flex;
+}
+
+/* ==================== Main Content Area ==================== */
+main {
+  margin-top: 120px;
+  transition: margin-top 0.3s ease;
+}
+
+main.expanded {
+  margin-top: 20px;
+}
+
+/* ==================== Left Controls ==================== */
+.left-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.ghost {
+  background: transparent;
+  color: var(--text-light);
+  border: 1px solid rgba(255,255,255,0.12);
+}
+
+input[type=file] {
+  display: none;
+}
+
+/* ==================== Background Selector ==================== */
+.bg-picker {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.bg-swatch {
+  width: 40px;
+  height: 32px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 2px solid rgba(255,255,255,0.06);
+}
+
+.bg-swatch:focus {
+  outline: 3px solid rgba(0,0,0,0.12);
+}
+
+/* ==================== History Modal ==================== */
+.history-wrap {
+  position: relative;
+}
+
+.history-list {
+  position: fixed;
+  background: var(--card-bg);
+  backdrop-filter: blur(6px);
+  border-radius: 10px;
+  padding: 12px;
+  width: max-content;
+  min-width: 320px;
+  max-width: calc(100vw - 200px);
+  max-height: 500px;
+  overflow-y: auto;
+  box-shadow: 0 10px 30px rgba(2,6,23,0.35);
+  z-index: 50;
+  color: inherit;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px;
+  border-radius: 8px;
+}
+
+.history-item .name {
+  flex: 1;
+  word-break: break-word;
+  padding-right: 12px;
+}
+
+.history-item:hover {
+  background: rgba(255,255,255,0.04);
+}
+
+/* ==================== Cards Area ==================== */
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.card {
+  display: grid;
+  grid-template-columns: 1fr 120px;
+  gap: 12px;
+  align-items: start;
+  padding: 14px;
+  border-radius: var(--card-radius);
+  background: var(--card-bg);
+  box-shadow: 0 6px 18px rgba(2,6,23,0.18);
+  transition: transform 0.12s;
+}
+
+.card:hover {
+  transform: translateY(-4px);
+}
+
+.card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.field {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 15px;
+  line-height: 1.45;
+  color: inherit;
+}
+
+.row-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.row-number {
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.col-first {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 500;
+  flex: 1;
+  text-align: right;
+}
+
+.cols-23 {
+  white-space: pre;
+  font-size: 15px;
+  line-height: 1.45;
+  color: inherit;
+}
+
+/* ==================== Stars Rating ==================== */
+.card-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.stars {
+  display: flex;
+  gap: 6px;
+}
+
+.star {
+  font-size: 20px;
+  cursor: pointer;
+  user-select: none;
+  color: rgba(255,255,255,0.45);
+}
+
+.star.active {
+  color: var(--star-yellow);
+  opacity: 1;
+}
+
+.freq {
+  font-size: 13px;
+  color: var(--muted);
+  align-self: flex-start;
+}
+
+.card-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  justify-content: flex-start;
+}
+
+.reset {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.12);
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* ==================== Empty State ==================== */
+.empty {
+  padding: 40px;
+  text-align: center;
+  color: var(--muted);
+}
+
+/* ==================== Responsive Design ==================== */
+@media (max-width: 820px) {
+  .card {
+    grid-template-columns: 1fr 96px;
+  }
+  
+  .history-list {
+    min-width: 320px;
+  }
+  
+  .scroll-control {
+    padding: 8px 12px;
+  }
+  
+  .scroll-control .slider-wrap {
+    min-width: 150px;
+    max-width: 300px;
+  }
+  
+  .scroll-control .right-controls {
+    margin-right: 12px;
+  }
+  
+  .scroll-control .row-info {
+    min-width: 150px;
+    font-size: 13px;
+    margin-right: 8px;
+  }
+  
+  .scroll-control .jump-input {
+    width: 70px;
+  }
+  
+  .toggle-view-btn {
+    font-size: 12px;
+    padding: 5px 10px;
+  }
+}
+
+@media (max-width: 520px) {
+  header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  
+  .card {
+    grid-template-columns: 1fr 88px;
+  }
+  
+  .card-side {
+    align-items: flex-end;
+  }
+  
+  .scroll-control {
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px 12px;
+  }
+  
+  .scroll-control .slider-wrap {
+    width: 100%;
+    max-width: 100%;
+    min-width: 100%;
+  }
+  
+  .scroll-control .right-controls {
+    width: 100%;
+    justify-content: space-between;
+    margin-right: 0;
+  }
+  
+  .scroll-control .row-info {
+    font-size: 12px;
+    min-width: auto;
+    margin-right: 8px;
+    flex: 1;
+  }
+  
+  .scroll-control .jump-input {
+    width: 60px;
+  }
+  
+  main {
+    margin-top: 160px;
+  }
+  
+  main.expanded {
+    margin-top: 20px;
+  }
+  
+  .toggle-view-btn {
+    align-self: flex-end;
+    font-size: 11px;
+    padding: 4px 8px;
+  }
+  
+  .bg-picker {
+    flex-wrap: wrap;
+  }
+}
+
+/* ==================== Utility Classes ==================== */
+.small {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.top-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
