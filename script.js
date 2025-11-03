@@ -84,6 +84,13 @@ let isViewsHidden = false; // Track visibility state of fixed views
 let isSpeechSupported = false; // Track if SpeechSynthesis API is supported
 let currentSpeechButton = null; // Track currently speaking button
 
+// Performance optimization: Virtual scrolling
+let allItems = []; // All sorted items
+let displayedItems = []; // Currently displayed items
+let currentBatch = 0; // Current batch index
+const BATCH_SIZE = 100; // Items per batch
+let isLoadingMore = false; // Prevent multiple simultaneous loads
+
 // ==================== Speech Synthesis Functions ====================
 /**
  * Check if SpeechSynthesis API is supported
@@ -479,8 +486,51 @@ function scrollToRow(rowNum, forceImmediate = false) {
   }
   
   // Find card with matching original row index
-  const targetCard = cardsEl.querySelector(`.card[data-row-index="${rowNum}"]`);
-  if (!targetCard) return false;
+  let targetCard = cardsEl.querySelector(`.card[data-row-index="${rowNum}"]`);
+  
+  // If card not rendered yet, use smart loading strategy
+  if (!targetCard && allItems.length > 0) {
+    const targetBatchIndex = Math.floor((rowNum - 1) / BATCH_SIZE);
+    const currentLastBatch = Math.floor((displayedItems.length - 1) / BATCH_SIZE);
+    
+    console.log(`目标行 ${rowNum} 在批次 ${targetBatchIndex + 1}，当前已加载到批次 ${currentLastBatch + 1}`);
+    
+    // Strategy: If jumping far ahead, clear and render target batch directly
+    // This avoids rendering thousands of intermediate items
+    if (targetBatchIndex > currentBatch + 5) {
+      console.log(`远距离跳转：清空当前显示，直接渲染目标批次附近`);
+      
+      // Clear current display
+      cardsEl.innerHTML = '';
+      displayedItems = [];
+      
+      // Render target batch and surrounding batches (for smooth scrolling)
+      const startBatch = Math.max(0, targetBatchIndex - 1);
+      const endBatch = Math.min(Math.ceil(allItems.length / BATCH_SIZE) - 1, targetBatchIndex + 2);
+      
+      currentBatch = startBatch;
+      
+      for (let i = startBatch; i <= endBatch; i++) {
+        renderNextBatch();
+      }
+      
+      console.log(`已渲染批次 ${startBatch + 1} 到 ${endBatch + 1}`);
+    } else {
+      // Close range: render sequentially
+      const targetBatchCount = targetBatchIndex + 1;
+      while (currentBatch < targetBatchCount && displayedItems.length < allItems.length) {
+        renderNextBatch();
+      }
+    }
+    
+    // Try finding the card again
+    targetCard = cardsEl.querySelector(`.card[data-row-index="${rowNum}"]`);
+  }
+  
+  if (!targetCard) {
+    console.warn(`无法找到行 ${rowNum} 对应的卡片`);
+    return false;
+  }
   
   const startTime = performance.now();
   
@@ -596,6 +646,7 @@ jumpInput.addEventListener('keypress', function(e) {
 });
 
 // Track scroll position and update slider/row info accordingly
+// Also handle auto-loading more items
 let scrollTimeout;
 window.addEventListener('scroll', function() {
   if (totalRows === 0) return;
@@ -630,15 +681,35 @@ window.addEventListener('scroll', function() {
         updateRowInfo();
       }
     }
+    
+    // Auto-load more items when near bottom
+    checkAndLoadMore();
   }, 150);
 });
+
+/**
+ * Check if user scrolled near bottom and load more items
+ */
+function checkAndLoadMore() {
+  if (isLoadingMore) return;
+  if (displayedItems.length >= allItems.length) return;
+  
+  const scrollPosition = window.pageYOffset + window.innerHeight;
+  const pageHeight = document.documentElement.scrollHeight;
+  
+  // Load more when within 500px of bottom
+  if (pageHeight - scrollPosition < 500) {
+    console.log('接近底部，自动加载更多...');
+    renderNextBatch();
+  }
+}
 
 // ==================== Card Rendering ====================
 function renderCards() {
   const startTime = performance.now();
-  cardsEl.innerHTML = '';
   
   if (!rows || !rows.length) {
+    cardsEl.innerHTML = '';
     emptyEl.style.display = 'block';
     updateScrollControls(); // Update controls to disabled state
     return;
@@ -650,24 +721,59 @@ function renderCards() {
   const dataRows = rows.length > 1 ? rows.slice(1) : rows;
   
   // Build items: for each CSV row -> card
-  const items = dataRows.map((r, idx) => ({
+  allItems = dataRows.map((r, idx) => ({
     idx,
     row: r,
     id: rowId(currentFile || 'nofile', r)
   }));
   
   // Ensure ratings default
-  items.forEach(it => {
+  allItems.forEach(it => {
     if (ratings[it.id] === undefined) ratings[it.id] = 0;
   });
   
   // Sort by rating desc, then idx
-  items.sort((a, b) => (ratings[b.id] || 0) - (ratings[a.id] || 0) || a.idx - b.idx);
+  allItems.sort((a, b) => (ratings[b.id] || 0) - (ratings[a.id] || 0) || a.idx - b.idx);
+  
+  // Reset and render first batch
+  currentBatch = 0;
+  displayedItems = [];
+  cardsEl.innerHTML = '';
+  
+  const renderTime = performance.now() - startTime;
+  console.log(`数据准备完成：${allItems.length} 条数据，耗时 ${renderTime.toFixed(2)}ms`);
+  
+  // Render first batch
+  renderNextBatch();
+  
+  // Update scroll controls after rendering
+  updateScrollControls();
+}
+
+/**
+ * Render next batch of cards
+ */
+function renderNextBatch() {
+  if (isLoadingMore) return;
+  
+  const startTime = performance.now();
+  isLoadingMore = true;
+  
+  const startIdx = currentBatch * BATCH_SIZE;
+  const endIdx = Math.min(startIdx + BATCH_SIZE, allItems.length);
+  const batchItems = allItems.slice(startIdx, endIdx);
+  
+  if (batchItems.length === 0) {
+    isLoadingMore = false;
+    return;
+  }
+  
+  console.log(`渲染批次 ${currentBatch + 1}：第 ${startIdx + 1}-${endIdx} 条`);
   
   // Use DocumentFragment for better performance
   const fragment = document.createDocumentFragment();
   
-  items.forEach(it => {
+  batchItems.forEach(it => {
     const card = document.createElement('div');
     card.className = 'card';
     card.dataset.rowIndex = it.idx + 1; // Store original row number (1-based)
@@ -788,6 +894,9 @@ function renderCards() {
     fragment.appendChild(card);
   });
   
+  // Add batch items to displayed list
+  displayedItems.push(...batchItems);
+  
   // Batch insert all cards at once for better performance
   cardsEl.appendChild(fragment);
   
@@ -796,13 +905,53 @@ function renderCards() {
   
   // Performance logging
   const renderTime = performance.now() - startTime;
-  console.log(`渲染完成：${items.length} 条数据，耗时 ${renderTime.toFixed(2)}ms`);
-  if (renderTime > 200 && items.length >= 1000) {
-    console.warn(`性能警告：渲染 ${items.length} 条数据耗时超过 200ms`);
+  console.log(`批次渲染完成：${batchItems.length} 条，总计 ${displayedItems.length}/${allItems.length}，耗时 ${renderTime.toFixed(2)}ms`);
+  
+  if (renderTime > 200) {
+    console.warn(`性能警告：渲染 ${batchItems.length} 条数据耗时超过 200ms`);
   }
   
-  // Update scroll controls after rendering
-  updateScrollControls();
+  // Increment batch counter
+  currentBatch++;
+  isLoadingMore = false;
+  
+  // Show loading indicator if more items available
+  updateLoadMoreIndicator();
+}
+
+/**
+ * Update or show "Load More" indicator
+ */
+function updateLoadMoreIndicator() {
+  let loadMoreBtn = document.getElementById('loadMoreBtn');
+  
+  if (displayedItems.length < allItems.length) {
+    if (!loadMoreBtn) {
+      loadMoreBtn = document.createElement('div');
+      loadMoreBtn.id = 'loadMoreBtn';
+      loadMoreBtn.className = 'load-more-btn';
+      loadMoreBtn.innerHTML = `
+        <button class="btn" onclick="renderNextBatch()">
+          加载更多 (${displayedItems.length}/${allItems.length})
+        </button>
+        <div class="small" style="margin-top: 8px;">
+          滚动到底部自动加载
+        </div>
+      `;
+      cardsEl.appendChild(loadMoreBtn);
+    } else {
+      // Update count
+      const btn = loadMoreBtn.querySelector('button');
+      if (btn) {
+        btn.textContent = `加载更多 (${displayedItems.length}/${allItems.length})`;
+      }
+    }
+  } else {
+    // All items loaded, remove button
+    if (loadMoreBtn) {
+      loadMoreBtn.remove();
+    }
+  }
 }
 
 function setRating(id, val) {

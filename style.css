@@ -426,6 +426,25 @@ input[type=file] {
   color: var(--muted);
 }
 
+/* ==================== Load More Button ==================== */
+.load-more-btn {
+  padding: 30px;
+  text-align: center;
+  margin: 20px 0;
+}
+
+.load-more-btn .btn {
+  font-size: 14px;
+  padding: 10px 20px;
+  background: var(--accent);
+  transition: all 0.2s ease;
+}
+
+.load-more-btn .btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(36, 107, 253, 0.3);
+}
+
 /* ==================== Responsive Design ==================== */
 @media (max-width: 820px) {
   .card {
