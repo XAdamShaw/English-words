@@ -262,6 +262,15 @@ function toggleFixedViews() {
   // Save state to localStorage
   localStorage.setItem('csv_views_hidden_v1', isViewsHidden);
   
+  // Re-adjust mobile layout after toggle (with small delay for animation)
+  if (!isViewsHidden) {
+    setTimeout(() => {
+      if (typeof adjustMobileLayout === 'function') {
+        adjustMobileLayout();
+      }
+    }, 350); // After transition completes
+  }
+  
   const responseTime = performance.now() - startTime;
   if (responseTime > 100) {
     console.warn(`响应时间警告：视图切换耗时 ${responseTime.toFixed(2)}ms，超过 100ms 目标`);
@@ -490,15 +499,27 @@ function scrollToRow(rowNum, forceImmediate = false) {
   
   // If card not rendered yet, use smart loading strategy
   if (!targetCard && allItems.length > 0) {
-    const targetBatchIndex = Math.floor((rowNum - 1) / BATCH_SIZE);
+    // CRITICAL: Find the item's position in the SORTED array (allItems)
+    // Because data is sorted by rating, original row number ≠ sorted position
+    const targetItemIndex = allItems.findIndex(item => item.idx === rowNum - 1);
+    
+    if (targetItemIndex === -1) {
+      console.warn(`在排序后的数据中未找到原始行 ${rowNum}`);
+      return false;
+    }
+    
+    // Calculate which batch this item is in (based on sorted position, not original row number)
+    const targetBatchIndex = Math.floor(targetItemIndex / BATCH_SIZE);
     const currentLastBatch = Math.floor((displayedItems.length - 1) / BATCH_SIZE);
     
-    console.log(`目标行 ${rowNum} 在批次 ${targetBatchIndex + 1}，当前已加载到批次 ${currentLastBatch + 1}`);
+    console.log(`目标行 ${rowNum} 在排序后的位置 ${targetItemIndex}，批次 ${targetBatchIndex + 1}，当前已加载到批次 ${currentBatch + 1}`);
     
-    // Strategy: If jumping far ahead, clear and render target batch directly
+    // Strategy: If jumping far away (forward or backward), clear and render target batch directly
     // This avoids rendering thousands of intermediate items
-    if (targetBatchIndex > currentBatch + 5) {
-      console.log(`远距离跳转：清空当前显示，直接渲染目标批次附近`);
+    const jumpDistance = Math.abs(targetBatchIndex - currentBatch);
+    
+    if (jumpDistance > 5) {
+      console.log(`远距离跳转（距离${jumpDistance}个批次）：清空当前显示，直接渲染目标批次附近`);
       
       // Clear current display
       cardsEl.innerHTML = '';
@@ -515,12 +536,29 @@ function scrollToRow(rowNum, forceImmediate = false) {
       }
       
       console.log(`已渲染批次 ${startBatch + 1} 到 ${endBatch + 1}`);
-    } else {
-      // Close range: render sequentially
+    } else if (targetBatchIndex >= currentBatch) {
+      // Close range forward: render sequentially
       const targetBatchCount = targetBatchIndex + 1;
       while (currentBatch < targetBatchCount && displayedItems.length < allItems.length) {
         renderNextBatch();
       }
+    } else {
+      // Close range backward: target batch is before current, need to re-render
+      console.log(`向后跳转：清空当前显示，重新渲染目标批次附近`);
+      
+      cardsEl.innerHTML = '';
+      displayedItems = [];
+      
+      const startBatch = Math.max(0, targetBatchIndex - 1);
+      const endBatch = Math.min(Math.ceil(allItems.length / BATCH_SIZE) - 1, targetBatchIndex + 2);
+      
+      currentBatch = startBatch;
+      
+      for (let i = startBatch; i <= endBatch; i++) {
+        renderNextBatch();
+      }
+      
+      console.log(`已渲染批次 ${startBatch + 1} 到 ${endBatch + 1}`);
     }
     
     // Try finding the card again
@@ -1073,12 +1111,59 @@ sw1.addEventListener('click', () => applyTheme(1));
 sw2.addEventListener('click', () => applyTheme(2));
 sw3.addEventListener('click', () => applyTheme(3));
 
+// ==================== Mobile Layout Fix ====================
+/**
+ * Adjust scroll-control position on mobile to prevent it from being hidden
+ */
+function adjustMobileLayout() {
+  const header = document.querySelector('header');
+  const scrollControl = document.querySelector('.scroll-control');
+  const main = document.querySelector('main');
+  
+  if (!header || !scrollControl || !main) return;
+  
+  // Only adjust on mobile (viewport width <= 520px)
+  const isMobile = window.innerWidth <= 520;
+  
+  if (isMobile) {
+    // Get actual header height
+    const headerHeight = header.offsetHeight;
+    
+    // Set scroll-control top position dynamically
+    scrollControl.style.top = `${headerHeight}px`;
+    
+    // Also adjust main margin-top to account for both fixed elements
+    const scrollControlHeight = scrollControl.offsetHeight;
+    const totalFixedHeight = headerHeight + scrollControlHeight + 10; // +10 for spacing
+    main.style.marginTop = `${totalFixedHeight}px`;
+    
+    console.log(`移动端布局调整：header高度 ${headerHeight}px，scroll-control高度 ${scrollControlHeight}px，总高度 ${totalFixedHeight}px`);
+  } else {
+    // Reset to default for desktop/tablet
+    scrollControl.style.top = '';
+    main.style.marginTop = '';
+  }
+}
+
+// Adjust on load
+window.addEventListener('load', adjustMobileLayout);
+
+// Adjust on resize (with debounce)
+let resizeTimeout;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimeout);
+  resizeTimeout = setTimeout(adjustMobileLayout, 100);
+});
+
 // ==================== Initialization ====================
 // Check speech synthesis support
 checkSpeechSupport();
 
 // Restore saved view state
 restoreViewState();
+
+// Initial mobile layout adjustment
+adjustMobileLayout();
 
 // Load last opened file if exists
 (function init() {
