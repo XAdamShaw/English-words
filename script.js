@@ -263,13 +263,11 @@ function toggleFixedViews() {
   localStorage.setItem('csv_views_hidden_v1', isViewsHidden);
   
   // Re-adjust mobile layout after toggle (with small delay for animation)
-  if (!isViewsHidden) {
-    setTimeout(() => {
-      if (typeof adjustMobileLayout === 'function') {
-        adjustMobileLayout();
-      }
-    }, 350); // After transition completes
-  }
+  setTimeout(() => {
+    if (typeof adjustMobileLayout === 'function') {
+      adjustMobileLayout();
+    }
+  }, 350); // After transition completes
   
   const responseTime = performance.now() - startTime;
   if (responseTime > 100) {
@@ -1126,20 +1124,30 @@ function adjustMobileLayout() {
   const isMobile = window.innerWidth <= 520;
   
   if (isMobile) {
-    // Get actual header height
-    const headerHeight = header.offsetHeight;
+    // Check if header is hidden
+    const isHidden = main.classList.contains('expanded');
     
-    // Set scroll-control top position dynamically
-    scrollControl.style.top = `${headerHeight}px`;
-    
-    // Also adjust main margin-top to account for both fixed elements
-    const scrollControlHeight = scrollControl.offsetHeight;
-    const totalFixedHeight = headerHeight + scrollControlHeight + 10; // +10 for spacing
-    main.style.marginTop = `${totalFixedHeight}px`;
-    
-    console.log(`移动端布局调整：header高度 ${headerHeight}px，scroll-control高度 ${scrollControlHeight}px，总高度 ${totalFixedHeight}px`);
+    if (isHidden) {
+      // When hidden, let CSS handle margin-top (0)
+      scrollControl.style.top = '';
+      main.style.marginTop = '';
+      console.log(`移动端布局调整：header已隐藏，使用CSS默认值`);
+    } else {
+      // When visible, calculate dynamic heights
+      const headerHeight = header.offsetHeight;
+      
+      // Set scroll-control top position dynamically
+      scrollControl.style.top = `${headerHeight}px`;
+      
+      // Also adjust main margin-top to account for both fixed elements
+      const scrollControlHeight = scrollControl.offsetHeight;
+      const totalFixedHeight = headerHeight + scrollControlHeight + 10; // +10 for spacing
+      main.style.marginTop = `${totalFixedHeight}px`;
+      
+      console.log(`移动端布局调整：header高度 ${headerHeight}px，scroll-control高度 ${scrollControlHeight}px，总高度 ${totalFixedHeight}px`);
+    }
   } else {
-    // Reset to default for desktop/tablet
+    // Reset to default for desktop/tablet (let CSS handle it)
     scrollControl.style.top = '';
     main.style.marginTop = '';
   }

@@ -211,7 +211,7 @@ main {
 }
 
 main.expanded {
-  margin-top: 20px;
+  margin-top: 0; /* Completely remove top spacing when header is hidden */
 }
 
 /* ==================== Left Controls ==================== */
@@ -341,12 +341,15 @@ input[type=file] {
   align-items: center;
   gap: 12px;
   margin-bottom: 4px;
+  /* Ensure it doesn't overflow into card-side */
+  overflow: hidden;
 }
 
 .row-number {
   font-size: 13px;
   color: var(--muted);
   font-weight: 600;
+  flex-shrink: 0; /* Prevent shrinking */
 }
 
 .col-first {
@@ -355,6 +358,13 @@ input[type=file] {
   font-weight: 500;
   flex: 1;
   text-align: right;
+  /* Prevent overflow into stars area */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* Add 4px margin to maintain spacing from stars */
+  margin-right: 4px;
+  min-width: 0; /* Allow flexbox to shrink below content size */
 }
 
 .cols-23-wrapper {
@@ -376,11 +386,15 @@ input[type=file] {
   flex-direction: column;
   align-items: center;
   gap: 12px;
+  /* Ensure stars stay on the right edge */
+  justify-content: flex-start;
 }
 
 .stars {
   display: flex;
   gap: 6px;
+  /* Ensure stars don't shrink */
+  flex-shrink: 0;
 }
 
 .star {
@@ -502,10 +516,35 @@ input[type=file] {
   
   .card {
     grid-template-columns: 1fr 88px;
+    gap: 8px; /* Reduce gap on mobile for more space */
   }
   
   .card-side {
-    align-items: flex-end;
+    align-items: flex-end; /* Right align stars */
+    /* Ensure it stays within its grid column */
+    max-width: 88px;
+    width: 100%;
+  }
+  
+  .row-header {
+    /* Ensure extra space from stars on mobile */
+    margin-right: 0;
+  }
+  
+  .col-first {
+    /* Slightly smaller font on mobile */
+    font-size: 10px;
+    /* Ensure it doesn't overflow */
+    max-width: calc(100% - 20px);
+  }
+  
+  .stars {
+    /* Smaller stars on mobile to fit better */
+    gap: 4px;
+  }
+  
+  .star {
+    font-size: 16px; /* Smaller stars on mobile */
   }
   
   .scroll-control {
@@ -544,7 +583,7 @@ input[type=file] {
   }
   
   main.expanded {
-    margin-top: 20px;
+    margin-top: 0; /* Completely remove top spacing when header is hidden */
   }
   
   .toggle-view-btn {
