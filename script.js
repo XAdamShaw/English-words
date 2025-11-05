@@ -2,7 +2,17 @@
 const HISTORY_KEY = 'csv_history_v2';
 
 function saveJSON(k, v) {
-  localStorage.setItem(k, JSON.stringify(v));
+  try {
+    localStorage.setItem(k, JSON.stringify(v));
+  } catch (e) {
+    if (e.name === 'QuotaExceededError') {
+      console.error(`localStorage配额已满，无法保存键"${k}"的数据。`);
+      throw e; // Re-throw to let caller handle it
+    } else {
+      console.error(`保存数据到localStorage失败（键: ${k}）:`, e);
+      throw e;
+    }
+  }
 }
 
 function loadJSON(k, def = null) {
@@ -83,6 +93,8 @@ let scrollAnimationId = null; // For interrupting ongoing scroll animations
 let isViewsHidden = false; // Track visibility state of fixed views
 let isSpeechSupported = false; // Track if SpeechSynthesis API is supported
 let currentSpeechButton = null; // Track currently speaking button
+let showDefinition = true; // Track definition field visibility
+let showSentence = true; // Track sentence field visibility
 
 // Performance optimization: Virtual scrolling
 let allItems = []; // All sorted items
@@ -321,7 +333,24 @@ function removeHistory(name) {
 }
 
 function saveCsv(name, rows) {
-  saveJSON('csv_data_' + name, rows);
+  // ⚠️ Disabled: Large CSV files exceed localStorage quota (5-10MB)
+  // Only save file name to history, not the content
+  try {
+    // Attempt to save only if file is small (< 1MB estimated)
+    const dataSize = JSON.stringify(rows).length;
+    if (dataSize < 1000000) { // ~1MB
+      saveJSON('csv_data_' + name, rows);
+      console.log(`CSV内容已保存到本地存储（大小: ${(dataSize / 1024).toFixed(2)} KB）`);
+    } else {
+      console.warn(`CSV文件过大（${(dataSize / 1024 / 1024).toFixed(2)} MB），跳过本地存储。请重新选择文件加载数据。`);
+    }
+  } catch (e) {
+    if (e.name === 'QuotaExceededError') {
+      console.error('localStorage配额已满，无法保存CSV内容。已保存文件名到历史记录。');
+    } else {
+      console.error('保存CSV失败:', e);
+    }
+  }
 }
 
 function loadCsv(name) {
@@ -329,7 +358,16 @@ function loadCsv(name) {
 }
 
 function saveRatings(name, ratings) {
-  saveJSON('csv_ratings_' + name, ratings);
+  try {
+    saveJSON('csv_ratings_' + name, ratings);
+  } catch (e) {
+    if (e.name === 'QuotaExceededError') {
+      console.error('localStorage配额已满，无法保存评分数据。');
+      alert('警告：本地存储空间不足，评分数据可能无法保存。\n\n建议：\n1. 清理浏览器缓存\n2. 使用较小的CSV文件');
+    } else {
+      console.error('保存评分失败:', e);
+    }
+  }
 }
 
 function loadRatings(name) {
@@ -436,7 +474,7 @@ fileInput.addEventListener('change', async e => {
 function loadFromHistory(name) {
   const data = loadCsv(name);
   if (!data) {
-    alert('历史中未保存该文件的内容，请重新上传');
+    alert(`文件"${name}"的内容未保存在本地存储中（可能因文件过大）。\n\n请点击"选择 CSV"按钮重新选择该文件。`);
     return;
   }
   loadFile(name, data);
@@ -753,15 +791,34 @@ function renderCards() {
     emptyEl.style.display = 'none';
   }
   
-  // Skip first row (header) if exists
-  const dataRows = rows.length > 1 ? rows.slice(1) : rows;
+  // Extract header row (first row) and data rows
+  const headerRow = rows.length > 0 ? rows[0] : [];
+  const dataRows = rows.length > 1 ? rows.slice(1) : [];
   
-  // Build items: for each CSV row -> card
-  allItems = dataRows.map((r, idx) => ({
-    idx,
-    row: r,
-    id: rowId(currentFile || 'nofile', r)
-  }));
+  // Create header mapping (column name to index)
+  const headerMap = {};
+  headerRow.forEach((colName, idx) => {
+    headerMap[colName] = idx;
+  });
+  
+  console.log('CSV标题行:', headerRow);
+  console.log('标题映射:', headerMap);
+  
+  // Build items: convert each CSV row to object with named fields
+  allItems = dataRows.map((r, idx) => {
+    // Convert array row to object using header names
+    const rowObj = {};
+    headerRow.forEach((colName, colIdx) => {
+      rowObj[colName] = r[colIdx];
+    });
+    
+    return {
+      idx,           // Original index (for compatibility)
+      row: rowObj,   // Row as object with named fields
+      rowArray: r,   // Keep original array for rowId compatibility
+      id: rowId(currentFile || 'nofile', r)
+    };
+  });
   
   // Ensure ratings default
   allItems.forEach(it => {
@@ -818,11 +875,11 @@ function renderNextBatch() {
     const body = document.createElement('div');
     body.className = 'card-body';
     
-    // Helper function to get cell value with fallback
-    const getCell = (index) => {
-      const val = it.row[index];
+    // Helper function to get cell value by field name with fallback
+    const getCell = (fieldName) => {
+      const val = it.row[fieldName];
       if (val === undefined || val === null || val === '') {
-        console.warn(`CSV数据异常：第${it.idx + 1}行第${index + 1}列数据缺失`);
+        console.warn(`CSV数据异常：第${it.idx + 1}行字段"${fieldName}"数据缺失`);
         return '—';
       }
       return val;
@@ -834,27 +891,31 @@ function renderNextBatch() {
     
     const rowNum = document.createElement('div');
     rowNum.className = 'row-number';
-    rowNum.textContent = `#${it.idx + 1}`;
+    // Use 'id' field from CSV if available, otherwise fallback to idx
+    const rowId = it.row['id'] !== undefined && it.row['id'] !== null && it.row['id'] !== '' 
+      ? it.row['id'] 
+      : it.idx;
+    rowNum.textContent = `#${parseInt(rowId) + 1}`;
     
     const colFirst = document.createElement('div');
     colFirst.className = 'col-first';
-    colFirst.textContent = getCell(0);
+    colFirst.textContent = getCell('frequency');
     
     header.appendChild(rowNum);
     header.appendChild(colFirst);
     body.appendChild(header);
     
-    // Columns 2 & 3 on same line with 4 spaces
-    if (it.row.length > 1) {
+    // Columns: word & phoneticSymbol on same line with 4 spaces
+    if (it.row['word'] !== undefined) {
       // Create wrapper for cols23 and speak button
       const cols23Wrapper = document.createElement('div');
       cols23Wrapper.className = 'cols-23-wrapper';
       
       const cols23 = document.createElement('div');
       cols23.className = 'cols-23';
-      const col2 = getCell(1);
-      const col3 = it.row.length > 2 ? getCell(2) : '';
-      cols23.textContent = col3 ? `${col2}    ${col3}` : col2;
+      const word = getCell('word');
+      const phoneticSymbol = it.row['phoneticSymbol'] ? getCell('phoneticSymbol') : '';
+      cols23.textContent = phoneticSymbol ? `${word}    ${phoneticSymbol}` : word;
       cols23Wrapper.appendChild(cols23);
       
       // Add speech button after cols23 with 4 spaces gap
@@ -869,7 +930,7 @@ function renderNextBatch() {
           e.stopPropagation(); // Prevent card click events
           
           try {
-            const textToSpeak = getCell(1);
+            const textToSpeak = getCell('word');
             speakText(textToSpeak, speakBtn);
           } catch (error) {
             console.error('朗读按钮点击处理异常:', error);
@@ -882,12 +943,19 @@ function renderNextBatch() {
       body.appendChild(cols23Wrapper);
     }
     
-    // Remaining columns (4+)
-    for (let i = 3; i < it.row.length; i++) {
-      const fld = document.createElement('div');
-      fld.className = 'field';
-      fld.textContent = getCell(i);
-      body.appendChild(fld);
+    // Additional fields: definition and sentence
+    if (it.row['definition'] !== undefined && it.row['definition'] !== null && it.row['definition'] !== '') {
+      const definitionField = document.createElement('div');
+      definitionField.className = showDefinition ? 'field field-definition' : 'field field-definition hidden-field';
+      definitionField.textContent = getCell('definition');
+      body.appendChild(definitionField);
+    }
+    
+    if (it.row['sentence'] !== undefined && it.row['sentence'] !== null && it.row['sentence'] !== '') {
+      const sentenceField = document.createElement('div');
+      sentenceField.className = showSentence ? 'field field-sentence' : 'field field-sentence hidden-field';
+      sentenceField.textContent = getCell('sentence');
+      body.appendChild(sentenceField);
     }
     
     // Right: stars
@@ -1163,6 +1231,120 @@ window.addEventListener('resize', () => {
   resizeTimeout = setTimeout(adjustMobileLayout, 100);
 });
 
+// ==================== Field Toggle Functions ====================
+/**
+ * Toggle definition field visibility
+ */
+function toggleDefinitionField() {
+  showDefinition = !showDefinition;
+  
+  const toggleCheckbox = document.getElementById('toggleDefinition');
+  const label = document.getElementById('definitionLabel');
+  
+  // Update checkbox state
+  if (toggleCheckbox) {
+    toggleCheckbox.checked = showDefinition;
+  }
+  
+  // Update label text
+  if (label) {
+    label.textContent = showDefinition ? '隐藏释义' : '显示释义';
+  }
+  
+  // Toggle all definition fields
+  const definitionFields = document.querySelectorAll('.field-definition');
+  definitionFields.forEach(field => {
+    if (showDefinition) {
+      field.classList.remove('hidden-field');
+    } else {
+      field.classList.add('hidden-field');
+    }
+  });
+  
+  // Save state to localStorage
+  localStorage.setItem('csv_show_definition_v1', showDefinition);
+  
+  console.log(`释义字段${showDefinition ? '显示' : '隐藏'}`);
+}
+
+/**
+ * Toggle sentence field visibility
+ */
+function toggleSentenceField() {
+  showSentence = !showSentence;
+  
+  const toggleCheckbox = document.getElementById('toggleSentence');
+  const label = document.getElementById('sentenceLabel');
+  
+  // Update checkbox state
+  if (toggleCheckbox) {
+    toggleCheckbox.checked = showSentence;
+  }
+  
+  // Update label text
+  if (label) {
+    label.textContent = showSentence ? '隐藏例句' : '显示例句';
+  }
+  
+  // Toggle all sentence fields
+  const sentenceFields = document.querySelectorAll('.field-sentence');
+  sentenceFields.forEach(field => {
+    if (showSentence) {
+      field.classList.remove('hidden-field');
+    } else {
+      field.classList.add('hidden-field');
+    }
+  });
+  
+  // Save state to localStorage
+  localStorage.setItem('csv_show_sentence_v1', showSentence);
+  
+  console.log(`例句字段${showSentence ? '显示' : '隐藏'}`);
+}
+
+/**
+ * Restore field visibility state from localStorage
+ */
+function restoreFieldVisibilityState() {
+  // Restore definition state
+  const savedDefinitionState = localStorage.getItem('csv_show_definition_v1');
+  if (savedDefinitionState !== null) {
+    showDefinition = savedDefinitionState === 'true';
+    
+    const toggleCheckbox = document.getElementById('toggleDefinition');
+    const label = document.getElementById('definitionLabel');
+    
+    if (toggleCheckbox) {
+      toggleCheckbox.checked = showDefinition;
+    }
+    
+    if (label) {
+      label.textContent = showDefinition ? '隐藏释义' : '显示释义';
+    }
+    
+    console.log(`恢复释义状态: ${showDefinition ? '显示' : '隐藏'}`);
+  }
+  
+  // Restore sentence state
+  const savedSentenceState = localStorage.getItem('csv_show_sentence_v1');
+  if (savedSentenceState !== null) {
+    showSentence = savedSentenceState === 'true';
+    
+    const toggleCheckbox = document.getElementById('toggleSentence');
+    const label = document.getElementById('sentenceLabel');
+    
+    if (toggleCheckbox) {
+      toggleCheckbox.checked = showSentence;
+    }
+    
+    if (label) {
+      label.textContent = showSentence ? '隐藏例句' : '显示例句';
+    }
+    
+    console.log(`恢复例句状态: ${showSentence ? '显示' : '隐藏'}`);
+  }
+}
+
 // ==================== Initialization ====================
 // Check speech synthesis support
 checkSpeechSupport();
@@ -1170,8 +1352,23 @@ checkSpeechSupport();
 // Restore saved view state
 restoreViewState();
 
+// Restore field visibility state
+restoreFieldVisibilityState();
+
 // Initial mobile layout adjustment
 adjustMobileLayout();
+
+// Field toggle event listeners
+const toggleDefinitionCheckbox = document.getElementById('toggleDefinition');
+const toggleSentenceCheckbox = document.getElementById('toggleSentence');
+
+if (toggleDefinitionCheckbox) {
+  toggleDefinitionCheckbox.addEventListener('change', toggleDefinitionField);
+}
+
+if (toggleSentenceCheckbox) {
+  toggleSentenceCheckbox.addEventListener('change', toggleSentenceField);
+}
 
 // Load last opened file if exists
 (function init() {

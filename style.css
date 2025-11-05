@@ -259,6 +259,72 @@ input[type=file] {
   outline: 3px solid rgba(0,0,0,0.12);
 }
 
+/* ==================== Field Toggle Switches ==================== */
+.field-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  cursor: pointer;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 24px;
+  transition: all 0.3s ease;
+}
+
+.toggle-slider:before {
+  content: "";
+  position: absolute;
+  height: 18px;
+  width: 18px;
+  left: 2px;
+  bottom: 2px;
+  background-color: white;
+  border-radius: 50%;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background-color: var(--accent);
+  border-color: var(--accent);
+}
+
+.toggle-switch input:checked + .toggle-slider:before {
+  transform: translateX(20px);
+}
+
+.toggle-switch:hover .toggle-slider {
+  opacity: 0.9;
+}
+
+.toggle-label {
+  font-size: 13px;
+  color: var(--text-light);
+  white-space: nowrap;
+  user-select: none;
+}
+
 /* ==================== History Modal ==================== */
 .history-wrap {
   position: relative;
@@ -333,6 +399,15 @@ input[type=file] {
   font-size: 15px;
   line-height: 1.45;
   color: inherit;
+  transition: max-height 0.3s ease, opacity 0.3s ease, margin 0.3s ease;
+  overflow: hidden;
+}
+
+.field.hidden-field {
+  max-height: 0;
+  opacity: 0;
+  margin: 0;
+  padding: 0;
 }
 
 .row-header {
@@ -594,6 +669,30 @@ input[type=file] {
   
   .bg-picker {
     flex-wrap: wrap;
+  }
+  
+  .field-toggle {
+    font-size: 11px;
+  }
+  
+  .toggle-switch {
+    width: 38px;
+    height: 20px;
+  }
+  
+  .toggle-slider:before {
+    height: 14px;
+    width: 14px;
+    left: 2px;
+    bottom: 2px;
+  }
+  
+  .toggle-switch input:checked + .toggle-slider:before {
+    transform: translateX(18px);
+  }
+  
+  .toggle-label {
+    font-size: 11px;
   }
   
   .speak-btn {

@@ -17,7 +17,9 @@
 ### 📁 CSV 文件管理
 - 支持拖拽或点击上传 CSV 文件
 - 自动保存上传历史到本地存储
-- 可从历史记录快速加载之前的文件
+- 小文件（< 1MB）可从历史记录快速加载
+- 大文件（≥ 1MB）需要重新选择（避免超出浏览器存储配额）
+- 智能错误处理，防止存储溢出
 
 ### ⭐ 评分系统
 - 为每个词条打 0-5 星评分
@@ -54,6 +56,15 @@
 - 状态自动保存
 - 详见：[Header 隐藏优化文档](HEADER_HIDE_FIX.md)
 
+### 🎚️ 字段显示控制
+- Toggle 开关控制释义（definition）显示/隐藏
+- Toggle 开关控制例句（sentence）显示/隐藏
+- 独立控制，互不影响
+- 平滑淡入淡出动画（300ms）
+- 卡片高度自动调整
+- 状态持久化保存
+- 详见：[字段显示控制文档](FIELD_TOGGLE_FEATURE.md)
+
 ### 📱 响应式设计
 - 适配桌面、平板、手机
 - 断点：820px、520px
@@ -65,14 +76,25 @@
 直接在浏览器中打开 `index.html` 即可使用，无需服务器。
 
 ### CSV 格式要求
-- 第一行为标题行（会被跳过）
+- 第一行为标题行（用于字段名映射）
 - 支持逗号分隔
 - 支持引号包裹的字段
-- 推荐格式：
+- 标准格式（推荐字段名）：
   ```csv
-  序号,单词,音标,中文释义,例句
-  1,abandon,/əˈbændən/,放弃,Don't abandon hope.
+  id,frequency,word,phoneticSymbol,definition,sentence
+  0,1000,abandon,/əˈbændən/,放弃；遗弃,Don't abandon hope.
+  1,999,ability,/əˈbɪləti/,能力；才能,He has the ability to succeed.
   ```
+
+#### 字段说明
+- `id`: 行标识符（从0开始，用于显示行号）
+- `frequency`: 词频（显示在右上角）
+- `word`: 单词（主内容，用于朗读）
+- `phoneticSymbol`: 音标（可选）
+- `definition`: 中文释义（可选）
+- `sentence`: 例句（可选）
+
+详见：[CSV 字段名访问文档](CSV_FIELD_NAME_ACCESS.md)
 
 ### 评分管理
 1. 点击卡片右侧的星星进行评分
@@ -174,6 +196,37 @@ JavaScript 代码按功能模块组织：
 ## 本地开发
 
 无需构建步骤，直接修改文件后刷新浏览器即可看到效果。
+
+## 常见问题
+
+### Q: 导入大文件时提示 "localStorage quota exceeded" 错误？
+
+**A**: 这是正常现象。浏览器的 localStorage 配额通常为 5-10MB，大文件（≥ 1MB）不会被保存到本地存储。
+
+**解决方案**：
+- 评分数据仍会保存（很小，不受影响）
+- 每次需要重新选择 CSV 文件
+- 或者将大文件拆分为多个小文件（< 1000 行）
+
+详见：[localStorage 配额问题文档](LOCALSTORAGE_QUOTA_FIX.md)
+
+### Q: 如何清理本地存储？
+
+**A**: 在浏览器控制台执行：
+```javascript
+localStorage.clear();
+```
+或者在浏览器设置中清除网站数据。
+
+### Q: CSV 文件需要什么格式？
+
+**A**: 标准格式如下：
+```csv
+id,frequency,word,phoneticSymbol,definition,sentence
+0,1000,abandon,/əˈbændən/,放弃,Don't abandon hope.
+```
+
+详见：[CSV 字段名访问文档](CSV_FIELD_NAME_ACCESS.md)
 
 ## License
 
