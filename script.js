@@ -1,3 +1,428 @@
+// ==================== JSONBin.io Configuration ====================
+const JSONBIN_API_KEY = '$2a$10$aykcTuMUyEz67pg05agzx.dqAWKAiMzRwI6EZZPjKbabxR77epyWC';
+const JSONBIN_BIN_ID = '690cab8c43b1c97be99cd080'; // Your bin ID
+const JSONBIN_BASE_URL = 'https://api.jsonbin.io/v3';
+
+// In-memory cache for sync data
+let syncCache = {}; // key -> { stars, lastViewedRow, filterLevel, sortByStars, syncStatus }
+
+/**
+ * Generate unique key for a CSV row
+ * @param {string} filename - CSV filename
+ * @param {string|number} rowId - Row ID from CSV
+ * @returns {string} Unique key like "vocab1-1234"
+ */
+function generateSyncKey(filename, rowId) {
+  // Remove .csv extension and special characters
+  const cleanFilename = filename.replace('.csv', '').replace(/[^a-zA-Z0-9]/g, '');
+  return `${cleanFilename}-${rowId}`;
+}
+
+/**
+ * Fetch all sync data from JSONBin.io
+ * @returns {Promise<Object>} Object with all sync records
+ */
+async function fetchAllSyncData() {
+  try {
+    const response = await fetch(`${JSONBIN_BASE_URL}/b/${JSONBIN_BIN_ID}/latest`, {
+      method: 'GET',
+      headers: {
+        'X-Master-Key': JSONBIN_API_KEY,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      console.error(`JSONBin.io 请求失败: ${response.status} ${response.statusText}`);
+      return null;
+    }
+
+    const data = await response.json();
+    console.log('✅ 从 JSONBin.io 获取同步数据成功');
+    return data.record || {};
+  } catch (error) {
+    console.error('❌ 获取 JSONBin.io 数据失败:', error);
+    return null;
+  }
+}
+
+/**
+ * Update sync data to JSONBin.io
+ * @param {Object} allData - Complete sync data object
+ * @returns {Promise<boolean>} Success status
+ */
+async function updateAllSyncData(allData) {
+  try {
+    const response = await fetch(`${JSONBIN_BASE_URL}/b/${JSONBIN_BIN_ID}`, {
+      method: 'PUT',
+      headers: {
+        'X-Master-Key': JSONBIN_API_KEY,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(allData)
+    });
+
+    if (!response.ok) {
+      console.error(`JSONBin.io 更新失败: ${response.status} ${response.statusText}`);
+      return false;
+    }
+
+    console.log('✅ 同步数据到 JSONBin.io 成功');
+    return true;
+  } catch (error) {
+    console.error('❌ 更新 JSONBin.io 数据失败:', error);
+    return false;
+  }
+}
+
+/**
+ * Get sync record for a specific key
+ * @param {string} key - Unique key
+ * @returns {Promise<Object|null>} Sync record or null
+ */
+async function getSyncRecord(key) {
+  // Check in-memory cache first
+  if (syncCache[key]) {
+    console.log(`📦 从缓存读取: ${key}`);
+    return syncCache[key];
+  }
+
+  // Fetch from JSONBin.io
+  const allData = await fetchAllSyncData();
+  if (!allData) {
+    return null;
+  }
+
+  // Update cache
+  syncCache = allData;
+
+  return allData[key] || null;
+}
+
+/**
+ * Update or create sync record
+ * @param {string} key - Unique key
+ * @param {Object} record - Record data
+ * @returns {Promise<boolean>} Success status
+ */
+async function updateSyncRecord(key, record) {
+  // Update in-memory cache
+  syncCache[key] = record;
+
+  // Fetch current data
+  const allData = await fetchAllSyncData();
+  if (!allData) {
+    // If fetch fails, still update cache but log error
+    console.warn('⚠️ 无法从 JSONBin.io 获取数据，仅更新本地缓存');
+    return false;
+  }
+
+  // Merge with existing data
+  allData[key] = record;
+
+  // Update to JSONBin.io
+  const success = await updateAllSyncData(allData);
+  
+  if (success) {
+    console.log(`✅ 同步记录已更新: ${key}`, record);
+  }
+
+  return success;
+}
+
+/**
+ * Check if a key exists in sync data
+ * @param {string} key - Unique key
+ * @returns {Promise<boolean>} True if exists
+ */
+async function syncRecordExists(key) {
+  const record = await getSyncRecord(key);
+  return record !== null;
+}
+
+/**
+ * Check and update sync status for a specific row
+ * @param {string} key - Unique sync key
+ * @param {HTMLElement} statusElement - DOM element to update
+ * @param {string} itemId - Item ID
+ * @param {string|number} rowId - Row ID
+ * @param {HTMLElement} cardElement - Card DOM element for UI update
+ */
+async function checkSyncStatus(key, statusElement, itemId, rowId, cardElement) {
+  try {
+    const record = await getSyncRecord(key);
+    
+    if (record) {
+      // Record exists
+      statusElement.className = 'sync-status synced';
+      statusElement.textContent = 'Synced';
+      statusElement.title = '已同步到云端';
+      
+      // Update local ratings from cloud if different
+      if (record.stars !== undefined && ratings[itemId] !== record.stars) {
+        const oldStars = ratings[itemId] || 0;
+        ratings[itemId] = record.stars;
+        console.log(`🔄 从云端恢复星级: ${key} → ${record.stars}星 (原: ${oldStars}星)`);
+        
+        // Update stars UI in the card
+        if (cardElement) {
+          updateCardStars(cardElement, itemId, record.stars);
+        }
+        
+        // Save to localStorage
+        if (currentFile) {
+          saveRatings(currentFile, ratings);
+        }
+      }
+    } else {
+      // Record does not exist
+      statusElement.className = 'sync-status not-synced';
+      statusElement.textContent = 'Not Synced';
+      statusElement.title = '未同步到云端';
+      
+      // Create initial record
+      const initialRecord = {
+        key: key,
+        stars: ratings[itemId] || 0,
+        lastViewedRow: null,
+        filterLevel: 'all',
+        sortByStars: false
+      };
+      
+      // Upload to cloud asynchronously (don't block UI)
+      updateSyncRecord(key, initialRecord).then(success => {
+        if (success) {
+          statusElement.className = 'sync-status synced';
+          statusElement.textContent = 'Synced';
+          statusElement.title = '已同步到云端';
+          console.log(`✅ 自动创建同步记录: ${key}`);
+        }
+      }).catch(error => {
+        console.error(`❌ 创建同步记录失败: ${key}`, error);
+      });
+    }
+  } catch (error) {
+    // Error occurred
+    statusElement.className = 'sync-status unknown';
+    statusElement.textContent = '⚠️';
+    statusElement.title = '同步状态未知';
+    console.error(`❌ 检查同步状态失败: ${key}`, error);
+  }
+}
+
+/**
+ * Update stars display in a card element
+ * @param {HTMLElement} cardElement - Card DOM element
+ * @param {string} itemId - Item ID
+ * @param {number} stars - Number of stars (0-5)
+ */
+function updateCardStars(cardElement, itemId, stars) {
+  const starsWrap = cardElement.querySelector('.stars');
+  if (!starsWrap) return;
+  
+  // Update all star elements
+  const starElements = starsWrap.querySelectorAll('.star');
+  starElements.forEach((star, index) => {
+    const starValue = index + 1;
+    if (starValue <= stars) {
+      star.classList.add('active');
+    } else {
+      star.classList.remove('active');
+    }
+  });
+  
+  console.log(`✨ UI已更新: ${itemId} → ${stars}星`);
+}
+
+/**
+ * Batch sync all data from cloud for current file
+ * This is called after CSV is loaded to restore user's learning progress
+ */
+async function batchSyncFromCloud() {
+  if (!currentFile) {
+    console.warn('⚠️ 无当前文件，跳过云端同步');
+    return;
+  }
+  
+  console.log('🔄 开始从云端批量同步数据...');
+  const startTime = performance.now();
+  
+  try {
+    // Show loading indicator
+    const loadingIndicator = showLoadingIndicator('正在从云端同步数据...');
+    
+    // Fetch all cloud data
+    const allCloudData = await fetchAllSyncData();
+    
+    if (!allCloudData) {
+      console.warn('⚠️ 无法获取云端数据');
+      hideLoadingIndicator(loadingIndicator);
+      return;
+    }
+    
+    // Update syncCache
+    syncCache = allCloudData;
+    
+    // Count updated items
+    let updatedCount = 0;
+    let lastViewedRow = null;
+    
+    // Restore global settings first
+    const globalKey = `${currentFile.replace('.csv', '')}_settings`;
+    if (allCloudData[globalKey]) {
+      const cloudSettings = allCloudData[globalKey];
+      
+      if (cloudSettings.filterLevel !== undefined) {
+        filterStarsLevel = cloudSettings.filterLevel;
+        const filterSelect = document.getElementById('filterStars');
+        if (filterSelect) {
+          filterSelect.value = filterStarsLevel;
+        }
+      }
+      
+      if (cloudSettings.sortByStars !== undefined) {
+        sortByStars = cloudSettings.sortByStars;
+        const toggleSortCheckbox = document.getElementById('toggleSortByStars');
+        const sortLabel = document.getElementById('sortLabel');
+        if (toggleSortCheckbox) {
+          toggleSortCheckbox.checked = sortByStars;
+        }
+        if (sortLabel) {
+          sortLabel.textContent = sortByStars ? '原始顺序' : '星级排序';
+        }
+      }
+      
+      if (cloudSettings.lastViewedRow !== undefined && cloudSettings.lastViewedRow !== null) {
+        lastViewedRow = cloudSettings.lastViewedRow;
+      }
+      
+      console.log('☁️ 全局设置已恢复:', cloudSettings);
+    }
+    
+    // Restore ratings for all items
+    for (const key in allCloudData) {
+      if (key.startsWith(currentFile.replace('.csv', '')) && key !== globalKey) {
+        const record = allCloudData[key];
+        if (record.stars !== undefined) {
+          // Find itemId by key
+          const rowIdFromKey = key.split('-')[1];
+          if (rowIdFromKey !== undefined) {
+            // Find matching item in allItems
+            const matchingItem = allItems.find(item => {
+              const itemRowId = item.row['id'] !== undefined ? item.row['id'] : item.idx;
+              return String(itemRowId) === String(rowIdFromKey);
+            });
+            
+            if (matchingItem) {
+              const oldStars = ratings[matchingItem.id] || 0;
+              if (oldStars !== record.stars) {
+                ratings[matchingItem.id] = record.stars;
+                updatedCount++;
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    // Save updated ratings to localStorage
+    if (updatedCount > 0 && currentFile) {
+      saveRatings(currentFile, ratings);
+      console.log(`💾 ${updatedCount} 条星级数据已保存到本地`);
+    }
+    
+    hideLoadingIndicator(loadingIndicator);
+    
+    const elapsed = performance.now() - startTime;
+    console.log(`✅ 云端同步完成：更新 ${updatedCount} 条数据，耗时 ${elapsed.toFixed(2)}ms`);
+    
+    // Re-render with updated data
+    if (updatedCount > 0 || (globalKey in allCloudData)) {
+      console.log('🔄 重新渲染页面以应用云端数据...');
+      renderCards();
+    }
+    
+    // Scroll to last viewed row if available
+    if (lastViewedRow !== null && lastViewedRow > 0) {
+      setTimeout(() => {
+        scrollToRow(lastViewedRow);
+        console.log(`📍 已滚动到上次浏览位置：第 ${lastViewedRow} 行`);
+      }, 500); // Wait for rendering to complete
+    }
+    
+  } catch (error) {
+    console.error('❌ 批量同步失败:', error);
+  }
+}
+
+/**
+ * Show loading indicator
+ * @param {string} message - Loading message
+ * @returns {HTMLElement} Loading indicator element
+ */
+function showLoadingIndicator(message) {
+  const existing = document.getElementById('cloud-sync-loading');
+  if (existing) {
+    return existing;
+  }
+  
+  const indicator = document.createElement('div');
+  indicator.id = 'cloud-sync-loading';
+  indicator.style.cssText = `
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 20px 40px;
+    border-radius: 8px;
+    z-index: 10000;
+    font-size: 14px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  `;
+  indicator.textContent = message || '加载中...';
+  document.body.appendChild(indicator);
+  return indicator;
+}
+
+/**
+ * Hide loading indicator
+ * @param {HTMLElement} indicator - Loading indicator element
+ */
+function hideLoadingIndicator(indicator) {
+  if (indicator && indicator.parentNode) {
+    indicator.parentNode.removeChild(indicator);
+  }
+}
+
+/**
+ * Save last viewed row to cloud
+ * @param {number} rowNum - Row number
+ */
+async function saveLastViewedRow(rowNum) {
+  if (!currentFile) return;
+  
+  const globalKey = `${currentFile.replace('.csv', '')}_settings`;
+  let settings = await getSyncRecord(globalKey);
+  
+  if (!settings) {
+    settings = {
+      key: globalKey,
+      filterLevel: filterStarsLevel,
+      sortByStars: sortByStars,
+      lastViewedRow: rowNum,
+      lastUpdated: new Date().toISOString()
+    };
+  } else {
+    settings.lastViewedRow = rowNum;
+    settings.lastUpdated = new Date().toISOString();
+  }
+  
+  await updateSyncRecord(globalKey, settings);
+  console.log(`📍 保存浏览位置: 第 ${rowNum} 行`);
+}
+
 // ==================== Storage Helpers ====================
 const HISTORY_KEY = 'csv_history_v2';
 
@@ -95,6 +520,8 @@ let isSpeechSupported = false; // Track if SpeechSynthesis API is supported
 let currentSpeechButton = null; // Track currently speaking button
 let showDefinition = true; // Track definition field visibility
 let showSentence = true; // Track sentence field visibility
+let filterStarsLevel = 'all'; // Track filter level (0-5 or 'all')
+let sortByStars = false; // Track if sorting by stars
 
 // Performance optimization: Virtual scrolling
 let allItems = []; // All sorted items
@@ -480,11 +907,15 @@ function loadFromHistory(name) {
   loadFile(name, data);
 }
 
-function loadFile(name, data) {
+async function loadFile(name, data) {
   currentFile = name;
   rows = data;
   ratings = loadRatings(name) || {};
   renderCards();
+  
+  // Batch sync from cloud after initial render
+  // This will update ratings and settings from cloud
+  await batchSyncFromCloud();
 }
 
 // ==================== Scroll Control Functions ====================
@@ -629,6 +1060,9 @@ function scrollToRow(rowNum, forceImmediate = false) {
       console.warn(`响应时间警告：即时跳转耗时 ${scrollTime.toFixed(2)}ms，超过 100ms 目标`);
     }
     
+    // Save last viewed row to cloud (async, don't block)
+    saveLastViewedRow(rowNum);
+    
     return true;
   } else {
     // Smooth scroll with fixed 0.5s duration using custom animation
@@ -656,6 +1090,9 @@ function scrollToRow(rowNum, forceImmediate = false) {
         scrollAnimationId = null;
         const scrollTime = performance.now() - startTime;
         console.log(`平滑滚动到第 ${rowNum} 行，总耗时 ${scrollTime.toFixed(2)}ms`);
+        
+        // Save last viewed row to cloud after animation completes
+        saveLastViewedRow(rowNum);
       }
     }
     
@@ -825,8 +1262,22 @@ function renderCards() {
     if (ratings[it.id] === undefined) ratings[it.id] = 0;
   });
   
-  // Sort by rating desc, then idx
-  allItems.sort((a, b) => (ratings[b.id] || 0) - (ratings[a.id] || 0) || a.idx - b.idx);
+  // Apply filter if enabled
+  if (filterStarsLevel !== 'all') {
+    const targetStars = parseInt(filterStarsLevel);
+    allItems = allItems.filter(it => (ratings[it.id] || 0) === targetStars);
+    console.log(`筛选${targetStars}星单词，剩余 ${allItems.length} 条`);
+  }
+  
+  // Sort by stars if enabled, otherwise keep original order
+  if (sortByStars) {
+    allItems.sort((a, b) => (ratings[b.id] || 0) - (ratings[a.id] || 0) || a.idx - b.idx);
+    console.log('按星级排序');
+  } else {
+    // Keep original order (sorted by idx)
+    allItems.sort((a, b) => a.idx - b.idx);
+    console.log('按原始顺序');
+  }
   
   // Reset and render first batch
   currentBatch = 0;
@@ -897,11 +1348,22 @@ function renderNextBatch() {
       : it.idx;
     rowNum.textContent = `#${parseInt(rowId) + 1}`;
     
+    // Sync status indicator
+    const syncStatus = document.createElement('span');
+    syncStatus.className = 'sync-status unknown';
+    syncStatus.textContent = '⚠️';
+    syncStatus.title = '检查同步状态中...';
+    
+    // Check sync status asynchronously (pass card element for UI update)
+    const syncKey = generateSyncKey(currentFile, rowId);
+    checkSyncStatus(syncKey, syncStatus, it.id, rowId, card);
+    
     const colFirst = document.createElement('div');
     colFirst.className = 'col-first';
     colFirst.textContent = getCell('frequency');
     
     header.appendChild(rowNum);
+    header.appendChild(syncStatus);
     header.appendChild(colFirst);
     body.appendChild(header);
     
@@ -973,7 +1435,7 @@ function renderNextBatch() {
       sp.dataset.value = s;
       sp.title = s + ' 星';
       sp.addEventListener('click', () => {
-        setRating(it.id, s);
+        setRating(it.id, s, rowId, syncStatus);
       });
       starsWrap.appendChild(sp);
     }
@@ -1058,9 +1520,40 @@ function updateLoadMoreIndicator() {
   }
 }
 
-function setRating(id, val) {
+async function setRating(id, val, rowId, syncStatusElement) {
   ratings[id] = val;
   if (currentFile) saveRatings(currentFile, ratings);
+  
+  // Sync to cloud if rowId is provided
+  if (rowId !== undefined && currentFile) {
+    const syncKey = generateSyncKey(currentFile, rowId);
+    
+    // Get existing record or create new one
+    let record = await getSyncRecord(syncKey);
+    if (!record) {
+      record = {
+        key: syncKey,
+        stars: val,
+        lastViewedRow: null,
+        filterLevel: 'all',
+        sortByStars: false
+      };
+    } else {
+      record.stars = val;
+    }
+    
+    // Update to cloud
+    const success = await updateSyncRecord(syncKey, record);
+    
+    if (success && syncStatusElement) {
+      syncStatusElement.className = 'sync-status synced';
+      syncStatusElement.textContent = 'Synced';
+      syncStatusElement.title = '已同步到云端';
+    }
+    
+    console.log(`⭐ 星级已更新并同步: ${syncKey} → ${val}星`);
+  }
+  
   renderCards();
 }
 
@@ -1303,6 +1796,87 @@ function toggleSentenceField() {
 }
 
 /**
+ * Update global settings to JSONBin.io
+ * This stores file-level settings like filterLevel and sortByStars
+ */
+async function updateGlobalSettings() {
+  if (!currentFile) return;
+  
+  const globalKey = `${currentFile.replace('.csv', '')}_settings`;
+  const settings = {
+    key: globalKey,
+    filterLevel: filterStarsLevel,
+    sortByStars: sortByStars,
+    lastUpdated: new Date().toISOString()
+  };
+  
+  await updateSyncRecord(globalKey, settings);
+  console.log(`💾 全局设置已同步: ${globalKey}`, settings);
+}
+
+/**
+ * Restore global settings from JSONBin.io or localStorage
+ */
+async function restoreGlobalSettings() {
+  // Try localStorage first
+  const savedFilterLevel = localStorage.getItem('csv_filter_level_v1');
+  const savedSortByStars = localStorage.getItem('csv_sort_by_stars_v1');
+  
+  if (savedFilterLevel !== null) {
+    filterStarsLevel = savedFilterLevel;
+    const filterSelect = document.getElementById('filterStars');
+    if (filterSelect) {
+      filterSelect.value = filterStarsLevel;
+    }
+    console.log(`恢复筛选级别: ${filterStarsLevel}`);
+  }
+  
+  if (savedSortByStars !== null) {
+    sortByStars = savedSortByStars === 'true';
+    const toggleSortCheckbox = document.getElementById('toggleSortByStars');
+    const sortLabel = document.getElementById('sortLabel');
+    if (toggleSortCheckbox) {
+      toggleSortCheckbox.checked = sortByStars;
+    }
+    if (sortLabel) {
+      sortLabel.textContent = sortByStars ? '原始顺序' : '星级排序';
+    }
+    console.log(`恢复排序设置: ${sortByStars ? '按星级' : '按原始'}`);
+  }
+  
+  // Try to fetch from cloud if currentFile exists
+  if (currentFile) {
+    const globalKey = `${currentFile.replace('.csv', '')}_settings`;
+    const cloudSettings = await getSyncRecord(globalKey);
+    
+    if (cloudSettings) {
+      // Cloud settings override local settings
+      if (cloudSettings.filterLevel !== undefined) {
+        filterStarsLevel = cloudSettings.filterLevel;
+        const filterSelect = document.getElementById('filterStars');
+        if (filterSelect) {
+          filterSelect.value = filterStarsLevel;
+        }
+      }
+      
+      if (cloudSettings.sortByStars !== undefined) {
+        sortByStars = cloudSettings.sortByStars;
+        const toggleSortCheckbox = document.getElementById('toggleSortByStars');
+        const sortLabel = document.getElementById('sortLabel');
+        if (toggleSortCheckbox) {
+          toggleSortCheckbox.checked = sortByStars;
+        }
+        if (sortLabel) {
+          sortLabel.textContent = sortByStars ? '原始顺序' : '星级排序';
+        }
+      }
+      
+      console.log(`☁️ 从云端恢复设置: ${globalKey}`, cloudSettings);
+    }
+  }
+}
+
+/**
  * Restore field visibility state from localStorage
  */
 function restoreFieldVisibilityState() {
@@ -1355,6 +1929,9 @@ restoreViewState();
 // Restore field visibility state
 restoreFieldVisibilityState();
 
+// Restore global settings (filter and sort)
+restoreGlobalSettings();
+
 // Initial mobile layout adjustment
 adjustMobileLayout();
 
@@ -1368,6 +1945,52 @@ if (toggleDefinitionCheckbox) {
 
 if (toggleSentenceCheckbox) {
   toggleSentenceCheckbox.addEventListener('change', toggleSentenceField);
+}
+
+// Filter and sort event listeners
+const filterStarsSelect = document.getElementById('filterStars');
+const toggleSortByStarsCheckbox = document.getElementById('toggleSortByStars');
+
+if (filterStarsSelect) {
+  filterStarsSelect.addEventListener('change', (e) => {
+    filterStarsLevel = e.target.value;
+    console.log(`筛选级别变更: ${filterStarsLevel}`);
+    
+    // Save to localStorage
+    localStorage.setItem('csv_filter_level_v1', filterStarsLevel);
+    
+    // Sync to cloud if currentFile exists
+    if (currentFile) {
+      updateGlobalSettings();
+    }
+    
+    // Re-render cards
+    renderCards();
+  });
+}
+
+if (toggleSortByStarsCheckbox) {
+  toggleSortByStarsCheckbox.addEventListener('change', (e) => {
+    sortByStars = e.target.checked;
+    console.log(`星级排序: ${sortByStars ? '开启' : '关闭'}`);
+    
+    // Update label
+    const sortLabel = document.getElementById('sortLabel');
+    if (sortLabel) {
+      sortLabel.textContent = sortByStars ? '原始顺序' : '星级排序';
+    }
+    
+    // Save to localStorage
+    localStorage.setItem('csv_sort_by_stars_v1', sortByStars);
+    
+    // Sync to cloud if currentFile exists
+    if (currentFile) {
+      updateGlobalSettings();
+    }
+    
+    // Re-render cards
+    renderCards();
+  });
 }
 
 // Load last opened file if exists
