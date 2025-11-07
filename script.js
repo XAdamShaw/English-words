@@ -5,6 +5,212 @@ const JSONBIN_BASE_URL = 'https://api.jsonbin.io/v3';
 
 // In-memory cache for sync data
 let syncCache = {}; // key -> { stars, lastViewedRow, filterLevel, sortByStars, syncStatus }
+let syncCacheModified = {}; // key -> boolean (track if data is modified)
+
+// ==================== Request Queue Manager ====================
+/**
+ * Request Queue Manager to handle rate limiting and prevent 429 errors
+ */
+class RequestQueueManager {
+  constructor() {
+    this.queue = [];
+    this.processing = false;
+    this.lastRequestTime = 0;
+    this.requestCount = 0;
+    this.requestTimestamps = [];
+    
+    // Configuration
+    this.maxConcurrent = 3;
+    this.minInterval = 200; // ms between requests
+    this.retryBackoff = [3000, 5000]; // 3-5 seconds random backoff on 429
+    this.maxRequestsPerMinute = 10;
+    this.currentConcurrent = 0;
+  }
+  
+  /**
+   * Add request to queue
+   * @param {Function} requestFn - Async function that performs the request
+   * @param {Object} options - Request options
+   * @returns {Promise} Promise that resolves when request completes
+   */
+  enqueue(requestFn, options = {}) {
+    return new Promise((resolve, reject) => {
+      this.queue.push({
+        requestFn,
+        options,
+        resolve,
+        reject,
+        retryCount: 0
+      });
+      
+      if (!this.processing) {
+        this.processQueue();
+      }
+    });
+  }
+  
+  /**
+   * Process queued requests with rate limiting
+   */
+  async processQueue() {
+    if (this.processing) return;
+    this.processing = true;
+    
+    while (this.queue.length > 0) {
+      // Check if we've exceeded rate limit
+      if (!this.canMakeRequest()) {
+        const waitTime = this.getWaitTime();
+        console.log(`⏳ 请求限流中，等待 ${waitTime}ms...`);
+        await this.sleep(waitTime);
+        continue;
+      }
+      
+      // Process up to maxConcurrent requests in parallel
+      const batch = [];
+      while (
+        this.queue.length > 0 && 
+        this.currentConcurrent < this.maxConcurrent &&
+        this.canMakeRequest()
+      ) {
+        const item = this.queue.shift();
+        this.currentConcurrent++;
+        batch.push(this.executeRequest(item));
+        
+        // Wait minimum interval before next request
+        if (this.queue.length > 0) {
+          await this.sleep(this.minInterval);
+        }
+      }
+      
+      // Wait for batch to complete
+      if (batch.length > 0) {
+        await Promise.all(batch);
+      }
+      
+      // If no more requests can be made now, wait
+      if (this.queue.length > 0 && !this.canMakeRequest()) {
+        const waitTime = this.getWaitTime();
+        await this.sleep(waitTime);
+      }
+    }
+    
+    this.processing = false;
+  }
+  
+  /**
+   * Execute a single request with retry logic
+   */
+  async executeRequest(item) {
+    try {
+      const result = await item.requestFn();
+      this.recordRequest();
+      this.currentConcurrent--;
+      item.resolve(result);
+    } catch (error) {
+      this.currentConcurrent--;
+      
+      // Handle 429 Too Many Requests
+      if (error.status === 429 || error.message?.includes('429')) {
+        if (item.retryCount < 3) {
+          console.warn(`⚠️ 429错误，${item.retryCount + 1}次重试...`);
+          
+          // Random backoff between 3-5 seconds
+          const backoff = this.retryBackoff[0] + 
+            Math.random() * (this.retryBackoff[1] - this.retryBackoff[0]);
+          
+          await this.sleep(backoff);
+          
+          // Re-queue the request
+          item.retryCount++;
+          this.queue.unshift(item);
+        } else {
+          console.error(`❌ 429错误，已重试3次，放弃请求`);
+          item.reject(error);
+        }
+      } else {
+        // Other errors
+        console.error(`❌ 请求失败:`, error);
+        item.reject(error);
+      }
+    }
+  }
+  
+  /**
+   * Check if we can make a request now
+   */
+  canMakeRequest() {
+    // Clean up old timestamps (> 1 minute ago)
+    const oneMinuteAgo = Date.now() - 60000;
+    this.requestTimestamps = this.requestTimestamps.filter(ts => ts > oneMinuteAgo);
+    
+    // Check rate limit
+    if (this.requestTimestamps.length >= this.maxRequestsPerMinute) {
+      return false;
+    }
+    
+    // Check minimum interval
+    const timeSinceLastRequest = Date.now() - this.lastRequestTime;
+    if (timeSinceLastRequest < this.minInterval) {
+      return false;
+    }
+    
+    return true;
+  }
+  
+  /**
+   * Calculate wait time until next request can be made
+   */
+  getWaitTime() {
+    // Wait time for rate limit
+    const oneMinuteAgo = Date.now() - 60000;
+    this.requestTimestamps = this.requestTimestamps.filter(ts => ts > oneMinuteAgo);
+    
+    if (this.requestTimestamps.length >= this.maxRequestsPerMinute) {
+      const oldestTimestamp = this.requestTimestamps[0];
+      const waitForRateLimit = oldestTimestamp + 60000 - Date.now();
+      return Math.max(waitForRateLimit, 0);
+    }
+    
+    // Wait time for minimum interval
+    const timeSinceLastRequest = Date.now() - this.lastRequestTime;
+    const waitForInterval = this.minInterval - timeSinceLastRequest;
+    
+    return Math.max(waitForInterval, 0);
+  }
+  
+  /**
+   * Record a successful request
+   */
+  recordRequest() {
+    const now = Date.now();
+    this.lastRequestTime = now;
+    this.requestTimestamps.push(now);
+    this.requestCount++;
+  }
+  
+  /**
+   * Sleep utility
+   */
+  sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+  
+  /**
+   * Get queue status
+   */
+  getStatus() {
+    return {
+      queueLength: this.queue.length,
+      processing: this.processing,
+      currentConcurrent: this.currentConcurrent,
+      requestsInLastMinute: this.requestTimestamps.length,
+      canMakeRequest: this.canMakeRequest()
+    };
+  }
+}
+
+// Create global request queue manager
+const requestQueue = new RequestQueueManager();
 
 /**
  * Generate unique key for a CSV row
@@ -47,32 +253,44 @@ async function fetchAllSyncData() {
 }
 
 /**
- * Update sync data to JSONBin.io
+ * Update sync data to JSONBin.io (with queue管理)
  * @param {Object} allData - Complete sync data object
  * @returns {Promise<boolean>} Success status
  */
 async function updateAllSyncData(allData) {
-  try {
-    const response = await fetch(`${JSONBIN_BASE_URL}/b/${JSONBIN_BIN_ID}`, {
-      method: 'PUT',
-      headers: {
-        'X-Master-Key': JSONBIN_API_KEY,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(allData)
-    });
+  // Enqueue the request
+  return requestQueue.enqueue(async () => {
+    try {
+      const response = await fetch(`${JSONBIN_BASE_URL}/b/${JSONBIN_BIN_ID}`, {
+        method: 'PUT',
+        headers: {
+          'X-Master-Key': JSONBIN_API_KEY,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(allData)
+      });
 
-    if (!response.ok) {
-      console.error(`JSONBin.io 更新失败: ${response.status} ${response.statusText}`);
+      if (response.status === 429) {
+        const error = new Error('Too Many Requests');
+        error.status = 429;
+        throw error;
+      }
+
+      if (!response.ok) {
+        console.error(`JSONBin.io 更新失败: ${response.status} ${response.statusText}`);
+        return false;
+      }
+
+      console.log('✅ 同步数据到 JSONBin.io 成功');
+      return true;
+    } catch (error) {
+      if (error.status === 429) {
+        throw error; // Re-throw 429 for queue manager to handle
+      }
+      console.error('❌ 更新 JSONBin.io 数据失败:', error);
       return false;
     }
-
-    console.log('✅ 同步数据到 JSONBin.io 成功');
-    return true;
-  } catch (error) {
-    console.error('❌ 更新 JSONBin.io 数据失败:', error);
-    return false;
-  }
+  });
 }
 
 /**
@@ -100,12 +318,29 @@ async function getSyncRecord(key) {
 }
 
 /**
- * Update or create sync record
+ * Update or create sync record (with change detection)
  * @param {string} key - Unique key
  * @param {Object} record - Record data
+ * @param {Object} options - Update options
  * @returns {Promise<boolean>} Success status
  */
-async function updateSyncRecord(key, record) {
+async function updateSyncRecord(key, record, options = {}) {
+  // Check if data actually changed
+  const existingData = syncCache[key];
+  if (existingData && !options.force) {
+    // Compare data to detect changes
+    const hasChanged = !isDataEqual(existingData, record);
+    
+    if (!hasChanged) {
+      console.log(`⏭️  跳过同步（数据未变更）: ${key}`);
+      syncCacheModified[key] = false;
+      return true; // Return success since data is already up-to-date
+    }
+  }
+  
+  // Mark as modified
+  syncCacheModified[key] = true;
+  
   // Update in-memory cache
   syncCache[key] = record;
 
@@ -120,14 +355,36 @@ async function updateSyncRecord(key, record) {
   // Merge with existing data
   allData[key] = record;
 
-  // Update to JSONBin.io
+  // Update to JSONBin.io (with queue management)
   const success = await updateAllSyncData(allData);
   
   if (success) {
     console.log(`✅ 同步记录已更新: ${key}`, record);
+    syncCacheModified[key] = false; // Reset modified flag after successful sync
   }
 
   return success;
+}
+
+/**
+ * Check if two data objects are equal
+ * @param {Object} obj1 - First object
+ * @param {Object} obj2 - Second object
+ * @returns {boolean} True if equal
+ */
+function isDataEqual(obj1, obj2) {
+  if (!obj1 || !obj2) return false;
+  
+  // Compare relevant fields
+  const keysToCompare = ['stars', 'filterLevel', 'sortByStars', 'lastViewedRow'];
+  
+  for (const key of keysToCompare) {
+    if (obj1[key] !== obj2[key]) {
+      return false;
+    }
+  }
+  
+  return true;
 }
 
 /**
@@ -141,15 +398,48 @@ async function syncRecordExists(key) {
 }
 
 /**
- * Check and update sync status for a specific row
+ * Check if item is in visible range (current batch ± 1)
+ * @param {number} itemIndex - Item index in allItems
+ * @returns {boolean} True if in visible range
+ */
+function isInVisibleRange(itemIndex) {
+  if (allItems.length === 0) return false;
+  
+  // Calculate item's batch
+  const itemBatch = Math.floor(itemIndex / BATCH_SIZE);
+  
+  // Visible range: current batch ± 1 (total 3 batches max)
+  const minBatch = Math.max(0, currentBatch - 1);
+  const maxBatch = Math.min(
+    Math.ceil(allItems.length / BATCH_SIZE) - 1,
+    currentBatch + 1
+  );
+  
+  return itemBatch >= minBatch && itemBatch <= maxBatch;
+}
+
+/**
+ * Check and update sync status for a specific row (with range control)
  * @param {string} key - Unique sync key
  * @param {HTMLElement} statusElement - DOM element to update
  * @param {string} itemId - Item ID
  * @param {string|number} rowId - Row ID
  * @param {HTMLElement} cardElement - Card DOM element for UI update
+ * @param {number} itemIndex - Item index in allItems array
  */
-async function checkSyncStatus(key, statusElement, itemId, rowId, cardElement) {
+async function checkSyncStatus(key, statusElement, itemId, rowId, cardElement, itemIndex) {
   try {
+    // Only sync for visible range (current batch ± 1)
+    const inVisibleRange = itemIndex !== undefined ? isInVisibleRange(itemIndex) : true;
+    
+    if (!inVisibleRange) {
+      // Out of range, skip cloud sync but show local status
+      statusElement.className = 'sync-status synced';
+      statusElement.textContent = 'Local';
+      statusElement.title = '本地数据（暂未同步）';
+      return;
+    }
+    
     const record = await getSyncRecord(key);
     
     if (record) {
@@ -180,33 +470,37 @@ async function checkSyncStatus(key, statusElement, itemId, rowId, cardElement) {
       statusElement.textContent = 'Not Synced';
       statusElement.title = '未同步到云端';
       
-      // Create initial record
-      const initialRecord = {
-        key: key,
-        stars: ratings[itemId] || 0,
-        lastViewedRow: null,
-        filterLevel: 'all',
-        sortByStars: false
-      };
-      
-      // Upload to cloud asynchronously (don't block UI)
-      updateSyncRecord(key, initialRecord).then(success => {
-        if (success) {
-          statusElement.className = 'sync-status synced';
-          statusElement.textContent = 'Synced';
-          statusElement.title = '已同步到云端';
-          console.log(`✅ 自动创建同步记录: ${key}`);
-        }
-      }).catch(error => {
-        console.error(`❌ 创建同步记录失败: ${key}`, error);
-      });
+      // Only create record for visible range to avoid flooding requests
+      if (inVisibleRange) {
+        // Create initial record
+        const initialRecord = {
+          key: key,
+          stars: ratings[itemId] || 0,
+          lastViewedRow: null,
+          filterLevel: 'all',
+          sortByStars: false
+        };
+        
+        // Upload to cloud asynchronously (don't block UI)
+        updateSyncRecord(key, initialRecord).then(success => {
+          if (success) {
+            statusElement.className = 'sync-status synced';
+            statusElement.textContent = 'Synced';
+            statusElement.title = '已同步到云端';
+            console.log(`✅ 自动创建同步记录: ${key}`);
+          }
+        }).catch(error => {
+          // Log but don't block
+          console.warn(`⚠️ 创建同步记录失败（跳过）: ${key}`, error.message || error);
+        });
+      }
     }
   } catch (error) {
-    // Error occurred
+    // Error occurred, log but don't block
     statusElement.className = 'sync-status unknown';
     statusElement.textContent = '⚠️';
     statusElement.title = '同步状态未知';
-    console.error(`❌ 检查同步状态失败: ${key}`, error);
+    console.warn(`⚠️ 检查同步状态失败（跳过）: ${key}`, error.message || error);
   }
 }
 
@@ -1317,7 +1611,7 @@ function renderNextBatch() {
   // Use DocumentFragment for better performance
   const fragment = document.createDocumentFragment();
   
-  batchItems.forEach(it => {
+  batchItems.forEach((it, batchIndex) => {
     const card = document.createElement('div');
     card.className = 'card';
     card.dataset.rowIndex = it.idx + 1; // Store original row number (1-based)
@@ -1354,9 +1648,10 @@ function renderNextBatch() {
     syncStatus.textContent = '⚠️';
     syncStatus.title = '检查同步状态中...';
     
-    // Check sync status asynchronously (pass card element for UI update)
+    // Check sync status asynchronously (pass card element and item index for range control)
     const syncKey = generateSyncKey(currentFile, rowId);
-    checkSyncStatus(syncKey, syncStatus, it.id, rowId, card);
+    const itemIndex = startIdx + batchIndex; // Global index in allItems
+    checkSyncStatus(syncKey, syncStatus, it.id, rowId, card, itemIndex);
     
     const colFirst = document.createElement('div');
     colFirst.className = 'col-first';
