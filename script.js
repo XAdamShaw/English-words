@@ -11,7 +11,7 @@
 const CLOUDFLARE_WORKER_URL = 'https://jsonbin-proxy.adamshawsolar.workers.dev'; // ⚠️ 替换为你的 Worker URL
 
 // JSONBin.io 配置（Worker 内部使用，无需修改）
-const JSONBIN_API_KEY = '$2a$10$aykcTuMUyEz67pg05agzx.dqAWKAiMzRwI6EZZPjKbabxR77epyWC';
+const JSONBIN_API额q_KEY = '$2a$10$aykcTuMUyEz67pg05agzx.dqAWKAiMzRwI6EZZPjKbabxR77epyWC';
 const JSONBIN_BIN_ID = '690cab8c43b1c97be99cd080';
 
 // In-memory cache for sync data
@@ -30,11 +30,13 @@ class RequestQueueManager {
     this.requestCount = 0;
     this.requestTimestamps = [];
     
-    // Configuration
-    this.maxConcurrent = 3;
-    this.minInterval = 200; // ms between requests
-    this.retryBackoff = [3000, 5000]; // 3-5 seconds random backoff on 429
-    this.maxRequestsPerMinute = 10;
+    // Configuration - Stricter limits to avoid 429
+    this.maxConcurrent = 2;        // Reduced from 3
+    this.minInterval = 150;        // Reduced from 200ms
+    this.retryBackoff = [3000, 6000]; // 3-6 seconds random backoff on 429
+    this.maxRequestsPerMinute = 5; // Reduced from 10
+    this.maxRetries = 2;           // Maximum retry attempts
+    this.timeout = 5000;           // 5 second timeout
     this.currentConcurrent = 0;
   }
   
@@ -109,38 +111,59 @@ class RequestQueueManager {
   }
   
   /**
-   * Execute a single request with retry logic
+   * Execute a single request with retry logic and timeout
    */
   async executeRequest(item) {
     try {
-      const result = await item.requestFn();
+      // Add timeout to request
+      const result = await Promise.race([
+        item.requestFn(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Request timeout')), this.timeout)
+        )
+      ]);
+      
       this.recordRequest();
       this.currentConcurrent--;
       item.resolve(result);
     } catch (error) {
       this.currentConcurrent--;
       
+      // Log error details
+      console.warn(`⚠️ 请求失败: ${error.message || error}`);
+      
       // Handle 429 Too Many Requests
       if (error.status === 429 || error.message?.includes('429')) {
-        if (item.retryCount < 3) {
-          console.warn(`⚠️ 429错误，${item.retryCount + 1}次重试...`);
+        if (item.retryCount < this.maxRetries) {
+          console.warn(`⚠️ 429错误，第 ${item.retryCount + 1} 次重试（最多${this.maxRetries}次）...`);
           
-          // Random backoff between 3-5 seconds
+          // Random backoff between 3-6 seconds
           const backoff = this.retryBackoff[0] + 
             Math.random() * (this.retryBackoff[1] - this.retryBackoff[0]);
           
+          console.log(`⏳ 退避等待 ${(backoff/1000).toFixed(1)} 秒...`);
           await this.sleep(backoff);
           
           // Re-queue the request
           item.retryCount++;
           this.queue.unshift(item);
         } else {
-          console.error(`❌ 429错误，已重试3次，放弃请求`);
+          console.error(`❌ 429错误，已重试${this.maxRetries}次，放弃请求`);
+          item.reject(error);
+        }
+      } else if (error.message === 'Request timeout') {
+        // Handle timeout
+        if (item.retryCount < this.maxRetries) {
+          console.warn(`⚠️ 请求超时，第 ${item.retryCount + 1} 次重试...`);
+          item.retryCount++;
+          this.queue.unshift(item);
+        } else {
+          console.error(`❌ 请求超时，已重试${this.maxRetries}次，放弃请求`);
           item.reject(error);
         }
       } else {
-        // Other errors
-        console.error(`❌ 请求失败:`, error);
+        // Other errors - don't retry, just reject
+        console.error(`❌ 请求失败（不重试）:`, error.message || error);
         item.reject(error);
       }
     }
@@ -433,7 +456,7 @@ function isInVisibleRange(itemIndex) {
 }
 
 /**
- * Check and update sync status for a specific row (with range control)
+ * Check and update sync status for a specific row (cache-only, no network requests)
  * @param {string} key - Unique sync key
  * @param {HTMLElement} statusElement - DOM element to update
  * @param {string} itemId - Item ID
@@ -441,32 +464,22 @@ function isInVisibleRange(itemIndex) {
  * @param {HTMLElement} cardElement - Card DOM element for UI update
  * @param {number} itemIndex - Item index in allItems array
  */
-async function checkSyncStatus(key, statusElement, itemId, rowId, cardElement, itemIndex) {
+function checkSyncStatus(key, statusElement, itemId, rowId, cardElement, itemIndex) {
   try {
-    // Only sync for visible range (current batch ± 1)
-    const inVisibleRange = itemIndex !== undefined ? isInVisibleRange(itemIndex) : true;
-    
-    if (!inVisibleRange) {
-      // Out of range, skip cloud sync but show local status
-      statusElement.className = 'sync-status synced';
-      statusElement.textContent = 'Local';
-      statusElement.title = '本地数据（暂未同步）';
-      return;
-    }
-    
-    const record = await getSyncRecord(key);
+    // Check if record exists in cache (no network request)
+    const record = syncCache[key];
     
     if (record) {
-      // Record exists
+      // Record exists in cache
       statusElement.className = 'sync-status synced';
       statusElement.textContent = 'Synced';
       statusElement.title = '已同步到云端';
       
-      // Update local ratings from cloud if different
+      // Update local ratings from cache if different
       if (record.stars !== undefined && ratings[itemId] !== record.stars) {
         const oldStars = ratings[itemId] || 0;
         ratings[itemId] = record.stars;
-        console.log(`🔄 从云端恢复星级: ${key} → ${record.stars}星 (原: ${oldStars}星)`);
+        console.log(`🔄 从缓存恢复星级: ${key} → ${record.stars}星 (原: ${oldStars}星)`);
         
         // Update stars UI in the card
         if (cardElement) {
@@ -479,42 +492,19 @@ async function checkSyncStatus(key, statusElement, itemId, rowId, cardElement, i
         }
       }
     } else {
-      // Record does not exist
+      // No record in cache - show local status
+      // Don't create new records here to avoid flooding requests
+      // Let batchSyncFromCloud handle initial sync
       statusElement.className = 'sync-status not-synced';
-      statusElement.textContent = 'Not Synced';
-      statusElement.title = '未同步到云端';
-      
-      // Only create record for visible range to avoid flooding requests
-      if (inVisibleRange) {
-        // Create initial record
-        const initialRecord = {
-          key: key,
-          stars: ratings[itemId] || 0,
-          lastViewedRow: null,
-          filterLevel: 'all',
-          sortByStars: false
-        };
-        
-        // Upload to cloud asynchronously (don't block UI)
-        updateSyncRecord(key, initialRecord).then(success => {
-          if (success) {
-            statusElement.className = 'sync-status synced';
-            statusElement.textContent = 'Synced';
-            statusElement.title = '已同步到云端';
-            console.log(`✅ 自动创建同步记录: ${key}`);
-          }
-        }).catch(error => {
-          // Log but don't block
-          console.warn(`⚠️ 创建同步记录失败（跳过）: ${key}`, error.message || error);
-        });
-      }
+      statusElement.textContent = 'Local';
+      statusElement.title = '本地数据（等待同步）';
     }
   } catch (error) {
     // Error occurred, log but don't block
     statusElement.className = 'sync-status unknown';
     statusElement.textContent = '⚠️';
     statusElement.title = '同步状态未知';
-    console.warn(`⚠️ 检查同步状态失败（跳过）: ${key}`, error.message || error);
+    console.warn(`⚠️ 检查同步状态失败: ${key}`, error.message || error);
   }
 }
 
@@ -552,24 +542,31 @@ async function batchSyncFromCloud() {
     return;
   }
   
-  console.log('🔄 开始从云端批量同步数据...');
+  // Check if we already have cache data - avoid redundant requests
+  if (Object.keys(syncCache).length > 0) {
+    console.log('📦 使用现有缓存数据，跳过云端同步');
+    return;
+  }
+  
+  console.log('🔄 开始从云端批量同步数据（这是唯一的网络请求）...');
   const startTime = performance.now();
   
   try {
     // Show loading indicator
     const loadingIndicator = showLoadingIndicator('正在从云端同步数据...');
     
-    // Fetch all cloud data
+    // Fetch all cloud data - THIS IS THE ONLY NETWORK REQUEST
     const allCloudData = await fetchAllSyncData();
     
     if (!allCloudData) {
-      console.warn('⚠️ 无法获取云端数据');
+      console.warn('⚠️ 无法获取云端数据，将仅使用本地数据');
       hideLoadingIndicator(loadingIndicator);
       return;
     }
     
-    // Update syncCache
+    // Update syncCache - all subsequent checks use this cache
     syncCache = allCloudData;
+    console.log(`📦 缓存已更新：${Object.keys(syncCache).length} 条记录`);
     
     // Count updated items
     let updatedCount = 0;
