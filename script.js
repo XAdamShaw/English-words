@@ -641,14 +641,10 @@ async function batchSyncFromCloud() {
     const elapsed = performance.now() - startTime;
     console.log(`✅ 云端同步完成：更新 ${updatedCount} 条数据，耗时 ${elapsed.toFixed(2)}ms`);
     
-    // Re-render with updated data
-    if (updatedCount > 0 || (globalKey in allCloudData)) {
-      console.log('🔄 重新渲染页面以应用云端数据...');
-      renderCards();
-    }
-    
-    // Scroll to last viewed row if available
+    // Note: Rendering will be handled by the caller (loadFile)
+    // Store last viewed row for later use
     if (lastViewedRow !== null && lastViewedRow > 0) {
+      // Schedule scroll after rendering completes
       setTimeout(() => {
         scrollToRow(lastViewedRow);
         console.log(`📍 已滚动到上次浏览位置：第 ${lastViewedRow} 行`);
@@ -1216,11 +1212,13 @@ async function loadFile(name, data) {
   currentFile = name;
   rows = data;
   ratings = loadRatings(name) || {};
-  renderCards();
   
-  // Batch sync from cloud after initial render
-  // This will update ratings and settings from cloud
+  // Batch sync from cloud BEFORE rendering
+  // This ensures syncCache is populated when checkSyncStatus is called
   await batchSyncFromCloud();
+  
+  // Now render with cloud data already in cache
+  renderCards();
 }
 
 // ==================== Scroll Control Functions ====================

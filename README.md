@@ -93,7 +93,8 @@
   - [云端同步功能文档](CLOUD_SYNC_FEATURE.md)
   - [云端数据回显补强文档](CLOUD_DATA_RESTORE.md)
   - [API限流优化文档](API_RATE_LIMIT_OPTIMIZATION.md)
-  - [429错误修复文档](429_ERROR_FIX.md)（✨ 最新优化）
+  - [429错误修复文档](429_ERROR_FIX.md)（✨ 请求优化）
+  - [同步状态显示修复文档](SYNC_STATUS_FIX.md)（✨ 最新修复）
   - [CORS解决方案完整指南](CORS_SOLUTION.md)
   - [Cloudflare Worker 配置完整指南](CLOUDFLARE_WORKER_SETUP_GUIDE.md)（逐步图文教程）
   - [配置简化说明](CONFIGURATION_SIMPLIFIED.md)（已删除其他方案）
