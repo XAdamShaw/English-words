@@ -1,7 +1,18 @@
-// ==================== JSONBin.io Configuration ====================
+// ==================== Cloudflare Worker Configuration ====================
+// 
+// ⚠️ 重要：请将下面的 URL 替换为你的 Cloudflare Worker URL
+// 
+// 如何获取 Worker URL：
+// 1. 按照 CLOUDFLARE_WORKER_SETUP_GUIDE.md 文档创建 Worker
+// 2. 部署成功后会显示类似：https://jsonbin-proxy.YOUR_USERNAME.workers.dev
+// 3. 复制该 URL 并替换下面的配置
+//
+// const CLOUDFLARE_WORKER_URL = 'https://your-worker.workers.dev'; // ⚠️ 替换为你的 Worker URL
+const CLOUDFLARE_WORKER_URL = 'https://jsonbin-proxy.adamshawsolar.workers.dev'; // ⚠️ 替换为你的 Worker URL
+
+// JSONBin.io 配置（Worker 内部使用，无需修改）
 const JSONBIN_API_KEY = '$2a$10$aykcTuMUyEz67pg05agzx.dqAWKAiMzRwI6EZZPjKbabxR77epyWC';
-const JSONBIN_BIN_ID = '690cab8c43b1c97be99cd080'; // Your bin ID
-const JSONBIN_BASE_URL = 'https://api.jsonbin.io/v3';
+const JSONBIN_BIN_ID = '690cab8c43b1c97be99cd080';
 
 // In-memory cache for sync data
 let syncCache = {}; // key -> { stars, lastViewedRow, filterLevel, sortByStars, syncStatus }
@@ -225,35 +236,37 @@ function generateSyncKey(filename, rowId) {
 }
 
 /**
- * Fetch all sync data from JSONBin.io
+ * Fetch all sync data from JSONBin.io via Cloudflare Worker
  * @returns {Promise<Object>} Object with all sync records
  */
 async function fetchAllSyncData() {
   try {
-    const response = await fetch(`${JSONBIN_BASE_URL}/b/${JSONBIN_BIN_ID}/latest`, {
+    const response = await fetch(`${CLOUDFLARE_WORKER_URL}/latest`, {
       method: 'GET',
       headers: {
-        'X-Master-Key': JSONBIN_API_KEY,
         'Content-Type': 'application/json'
       }
     });
 
     if (!response.ok) {
-      console.error(`JSONBin.io 请求失败: ${response.status} ${response.statusText}`);
+      console.error(`云端请求失败: ${response.status} ${response.statusText}`);
       return null;
     }
 
     const data = await response.json();
-    console.log('✅ 从 JSONBin.io 获取同步数据成功');
-    return data.record || {};
+    console.log('✅ 从云端获取同步数据成功');
+    
+    return data.record || data || {};
   } catch (error) {
-    console.error('❌ 获取 JSONBin.io 数据失败:', error);
+    console.error('❌ 获取云端数据失败:', error);
+    console.warn('💡 提示: 请检查 CLOUDFLARE_WORKER_URL 配置是否正确');
+    console.warn('💡 详见: CLOUDFLARE_WORKER_SETUP_GUIDE.md');
     return null;
   }
 }
 
 /**
- * Update sync data to JSONBin.io (with queue管理)
+ * Update sync data to JSONBin.io via Cloudflare Worker (with queue management)
  * @param {Object} allData - Complete sync data object
  * @returns {Promise<boolean>} Success status
  */
@@ -261,10 +274,9 @@ async function updateAllSyncData(allData) {
   // Enqueue the request
   return requestQueue.enqueue(async () => {
     try {
-      const response = await fetch(`${JSONBIN_BASE_URL}/b/${JSONBIN_BIN_ID}`, {
+      const response = await fetch(`${CLOUDFLARE_WORKER_URL}/update`, {
         method: 'PUT',
         headers: {
-          'X-Master-Key': JSONBIN_API_KEY,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(allData)
@@ -277,17 +289,19 @@ async function updateAllSyncData(allData) {
       }
 
       if (!response.ok) {
-        console.error(`JSONBin.io 更新失败: ${response.status} ${response.statusText}`);
+        console.error(`云端更新失败: ${response.status} ${response.statusText}`);
         return false;
       }
 
-      console.log('✅ 同步数据到 JSONBin.io 成功');
+      console.log('✅ 同步数据到云端成功');
       return true;
     } catch (error) {
       if (error.status === 429) {
         throw error; // Re-throw 429 for queue manager to handle
       }
-      console.error('❌ 更新 JSONBin.io 数据失败:', error);
+      console.error('❌ 更新云端数据失败:', error);
+      console.warn('💡 提示: 请检查 CLOUDFLARE_WORKER_URL 配置是否正确');
+      console.warn('💡 详见: CLOUDFLARE_WORKER_SETUP_GUIDE.md');
       return false;
     }
   });

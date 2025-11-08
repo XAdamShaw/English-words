@@ -84,10 +84,17 @@
   - 可见范围控制（只同步当前页±1页）
   - 速率限制（≤10请求/分钟）
   - 429错误率降低95%+，请求数减少90%+
+- **CORS 解决方案**：
+  - ✅ 已选用：Cloudflare Worker 代理（最安全）
+  - 配置已简化：只需修改一个 Worker URL 配置
+  - 其他备选方案已移除，代码更简洁
 - 详见：
   - [云端同步功能文档](CLOUD_SYNC_FEATURE.md)
   - [云端数据回显补强文档](CLOUD_DATA_RESTORE.md)
   - [API限流优化文档](API_RATE_LIMIT_OPTIMIZATION.md)
+  - [CORS解决方案完整指南](CORS_SOLUTION.md)
+  - [Cloudflare Worker 配置完整指南](CLOUDFLARE_WORKER_SETUP_GUIDE.md)（逐步图文教程）
+  - [配置简化说明](CONFIGURATION_SIMPLIFIED.md)（已删除其他方案）
 
 ### 🔍 筛选与排序
 - 按星级筛选单词（0-5星或全部）
