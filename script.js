@@ -294,9 +294,17 @@ async function fetchAllSyncData() {
  * @returns {Promise<boolean>} Success status
  */
 async function updateAllSyncData(allData) {
+  console.log('ADLog-Edit: [updateAllSyncData] ========== 开始 ==========');
+  console.log('ADLog-Edit: [updateAllSyncData] allData keys:', Object.keys(allData).length);
+  console.log('ADLog-Edit: [updateAllSyncData] 准备加入请求队列...');
+  
   // Enqueue the request
   return requestQueue.enqueue(async () => {
     try {
+      console.log('ADLog-Edit: [updateAllSyncData] 请求已从队列取出，准备发送 fetch...');
+      console.log('ADLog-Edit: [updateAllSyncData] URL:', `${CLOUDFLARE_WORKER_URL}/update`);
+      console.log('ADLog-Edit: [updateAllSyncData] Method: PUT');
+      
       const response = await fetch(`${CLOUDFLARE_WORKER_URL}/update`, {
         method: 'PUT',
         headers: {
@@ -305,21 +313,28 @@ async function updateAllSyncData(allData) {
         body: JSON.stringify(allData)
       });
 
+      console.log('ADLog-Edit: [updateAllSyncData] fetch 返回 status:', response.status);
+
       if (response.status === 429) {
+        console.log('ADLog-Edit: [updateAllSyncData] 收到 429 错误');
         const error = new Error('Too Many Requests');
         error.status = 429;
         throw error;
       }
 
       if (!response.ok) {
+        console.error(`ADLog-Edit: [updateAllSyncData] 云端更新失败: ${response.status} ${response.statusText}`);
         console.error(`云端更新失败: ${response.status} ${response.statusText}`);
         return false;
       }
 
+      console.log('ADLog-Edit: [updateAllSyncData] ✅ 同步成功！');
       console.log('✅ 同步数据到云端成功');
       return true;
     } catch (error) {
+      console.log('ADLog-Edit: [updateAllSyncData] catch 到错误:', error.message);
       if (error.status === 429) {
+        console.log('ADLog-Edit: [updateAllSyncData] 重新抛出 429 错误供队列管理器处理');
         throw error; // Re-throw 429 for queue manager to handle
       }
       console.error('❌ 更新云端数据失败:', error);
@@ -336,22 +351,31 @@ async function updateAllSyncData(allData) {
  * @returns {Promise<Object|null>} Sync record or null
  */
 async function getSyncRecord(key) {
+  console.log(`ADLog-Edit: [getSyncRecord] 获取记录: ${key}`);
+  
   // Check in-memory cache first
   if (syncCache[key]) {
+    console.log(`ADLog-Edit: [getSyncRecord] ✅ 在缓存中找到`);
+    console.log(`ADLog-Edit: [getSyncRecord] 返回对象:`, JSON.stringify(syncCache[key]));
     console.log(`📦 从缓存读取: ${key}`);
     return syncCache[key];
   }
 
+  console.log(`ADLog-Edit: [getSyncRecord] ❌ 缓存中未找到，准备 fetch...`);
   // Fetch from JSONBin.io
   const allData = await fetchAllSyncData();
   if (!allData) {
+    console.log(`ADLog-Edit: [getSyncRecord] fetchAllSyncData 返回空，返回 null`);
     return null;
   }
 
   // Update cache
   syncCache = allData;
+  console.log(`ADLog-Edit: [getSyncRecord] 已更新缓存`);
 
-  return allData[key] || null;
+  const result = allData[key] || null;
+  console.log(`ADLog-Edit: [getSyncRecord] 返回:`, result ? JSON.stringify(result) : 'null');
+  return result;
 }
 
 /**
@@ -362,44 +386,59 @@ async function getSyncRecord(key) {
  * @returns {Promise<boolean>} Success status
  */
 async function updateSyncRecord(key, record, options = {}) {
+  console.log('ADLog-Edit: [updateSyncRecord] ========== 开始 ==========');
+  console.log('ADLog-Edit: [updateSyncRecord] key =', key);
+  console.log('ADLog-Edit: [updateSyncRecord] record =', JSON.stringify(record));
+  console.log('ADLog-Edit: [updateSyncRecord] options =', options);
+  
   // Check if data actually changed
   const existingData = syncCache[key];
+  console.log('ADLog-Edit: [updateSyncRecord] existingData =', JSON.stringify(existingData));
+  console.log('ADLog-Edit: [updateSyncRecord] existingData === record?', existingData === record);
+  
   if (existingData && !options.force) {
+    console.log('ADLog-Edit: [updateSyncRecord] 准备比较数据是否变更...');
     // Compare data to detect changes
     const hasChanged = !isDataEqual(existingData, record);
+    console.log('ADLog-Edit: [updateSyncRecord] hasChanged =', hasChanged);
     
     if (!hasChanged) {
+      console.log('ADLog-Edit: [updateSyncRecord] ⏭️  数据未变更，跳过同步');
       console.log(`⏭️  跳过同步（数据未变更）: ${key}`);
       syncCacheModified[key] = false;
       return true; // Return success since data is already up-to-date
     }
+  } else {
+    console.log('ADLog-Edit: [updateSyncRecord] 跳过变更检测（existingData 为空或 force=true）');
   }
   
   // Mark as modified
   syncCacheModified[key] = true;
+  console.log('ADLog-Edit: [updateSyncRecord] 标记为已修改');
   
-  // Update in-memory cache
+  // Update in-memory cache first
   syncCache[key] = record;
+  console.log('ADLog-Edit: [updateSyncRecord] 已更新内存缓存');
+  
+  console.log(`🔄 准备同步到云端: ${key}`, record);
 
-  // Fetch current data
-  const allData = await fetchAllSyncData();
-  if (!allData) {
-    // If fetch fails, still update cache but log error
-    console.warn('⚠️ 无法从 JSONBin.io 获取数据，仅更新本地缓存');
-    return false;
-  }
-
-  // Merge with existing data
-  allData[key] = record;
+  // Use existing syncCache instead of fetching again
+  // This avoids unnecessary network requests and potential failures
+  const allData = { ...syncCache };
+  console.log('ADLog-Edit: [updateSyncRecord] 准备调用 updateAllSyncData...');
 
   // Update to JSONBin.io (with queue management)
   const success = await updateAllSyncData(allData);
+  console.log('ADLog-Edit: [updateSyncRecord] updateAllSyncData 返回:', success);
   
   if (success) {
     console.log(`✅ 同步记录已更新: ${key}`, record);
     syncCacheModified[key] = false; // Reset modified flag after successful sync
+  } else {
+    console.warn(`⚠️ 同步失败，数据已保存到本地缓存: ${key}`);
   }
 
+  console.log('ADLog-Edit: [updateSyncRecord] ========== 结束 ==========');
   return success;
 }
 
@@ -410,17 +449,28 @@ async function updateSyncRecord(key, record, options = {}) {
  * @returns {boolean} True if equal
  */
 function isDataEqual(obj1, obj2) {
-  if (!obj1 || !obj2) return false;
+  console.log('ADLog-Edit: [isDataEqual] 开始比较对象');
+  console.log('ADLog-Edit: [isDataEqual] obj1 =', JSON.stringify(obj1));
+  console.log('ADLog-Edit: [isDataEqual] obj2 =', JSON.stringify(obj2));
+  console.log('ADLog-Edit: [isDataEqual] obj1 === obj2 (同一引用)?', obj1 === obj2);
+  
+  if (!obj1 || !obj2) {
+    console.log('ADLog-Edit: [isDataEqual] 其中一个对象为空，返回 false');
+    return false;
+  }
   
   // Compare relevant fields
   const keysToCompare = ['stars', 'filterLevel', 'sortByStars', 'lastViewedRow'];
   
   for (const key of keysToCompare) {
+    console.log(`ADLog-Edit: [isDataEqual] 比较 ${key}: obj1.${key}=${obj1[key]}, obj2.${key}=${obj2[key]}`);
     if (obj1[key] !== obj2[key]) {
+      console.log(`ADLog-Edit: [isDataEqual] ${key} 不相等，返回 false`);
       return false;
     }
   }
   
+  console.log('ADLog-Edit: [isDataEqual] 所有字段都相等，返回 true');
   return true;
 }
 
@@ -1752,7 +1802,8 @@ function renderNextBatch() {
     zero.textContent = '取消';
     zero.addEventListener('click', () => {
       if (confirm('确认要将该项评分重置为 0 吗？')) {
-        setRating(it.id, 0);
+        // ✅ 传递完整的参数，包括 rowId 和 syncStatus
+        setRating(it.id, 0, rowId, syncStatus);
       }
     });
     
@@ -1825,16 +1876,33 @@ function updateLoadMoreIndicator() {
 }
 
 async function setRating(id, val, rowId, syncStatusElement) {
+  console.log('ADLog-Edit: [setRating] ========== 开始 ==========');
+  console.log(`ADLog-Edit: [setRating] id = ${id}`);
+  console.log(`ADLog-Edit: [setRating] val = ${val}`);
+  console.log(`ADLog-Edit: [setRating] rowId = ${rowId}`);
+  console.log(`ADLog-Edit: [setRating] currentFile = ${currentFile}`);
+  console.log(`⭐ 开始设置星级: id=${id}, val=${val}, rowId=${rowId}`);
+  
   ratings[id] = val;
+  console.log(`ADLog-Edit: [setRating] 已更新本地 ratings[${id}] = ${val}`);
+  
   if (currentFile) saveRatings(currentFile, ratings);
   
   // Sync to cloud if rowId is provided
   if (rowId !== undefined && currentFile) {
     const syncKey = generateSyncKey(currentFile, rowId);
+    console.log(`ADLog-Edit: [setRating] 生成的 syncKey = ${syncKey}`);
+    console.log(`🔑 生成同步key: ${syncKey}`);
     
     // Get existing record or create new one
+    console.log(`ADLog-Edit: [setRating] 准备调用 getSyncRecord(${syncKey})...`);
     let record = await getSyncRecord(syncKey);
+    console.log(`ADLog-Edit: [setRating] getSyncRecord 返回:`, JSON.stringify(record));
+    console.log(`ADLog-Edit: [setRating] record 的引用地址: ${record ? Object.keys(record).join(',') : 'null'}`);
+    
     if (!record) {
+      console.log(`ADLog-Edit: [setRating] record 为空，创建新记录`);
+      console.log(`📝 创建新记录: ${syncKey}`);
       record = {
         key: syncKey,
         stars: val,
@@ -1842,22 +1910,40 @@ async function setRating(id, val, rowId, syncStatusElement) {
         filterLevel: 'all',
         sortByStars: false
       };
+      console.log(`ADLog-Edit: [setRating] 新创建的 record:`, JSON.stringify(record));
     } else {
-      record.stars = val;
+      console.log(`ADLog-Edit: [setRating] record 存在，准备修改 stars`);
+      console.log(`ADLog-Edit: [setRating] 修改前 record.stars = ${record.stars}`);
+      console.log(`📝 更新现有记录: ${syncKey}`);
+      // ✅ 创建新对象，避免修改原始引用
+      record = { ...record, stars: val };
+      console.log(`ADLog-Edit: [setRating] 修改后 record.stars = ${record.stars}`);
+      console.log(`ADLog-Edit: [setRating] 修改后完整 record:`, JSON.stringify(record));
+      console.log(`ADLog-Edit: [setRating] ✅ 已创建新对象，避免引用问题`);
     }
     
     // Update to cloud
+    console.log(`ADLog-Edit: [setRating] 准备调用 updateSyncRecord...`);
+    console.log(`☁️  开始调用 updateSyncRecord...`);
     const success = await updateSyncRecord(syncKey, record);
+    console.log(`ADLog-Edit: [setRating] updateSyncRecord 返回: ${success}`);
+    console.log(`☁️  updateSyncRecord 返回: ${success}`);
     
     if (success && syncStatusElement) {
       syncStatusElement.className = 'sync-status synced';
       syncStatusElement.textContent = 'Synced';
       syncStatusElement.title = '已同步到云端';
+      console.log(`✅ 同步状态已更新为 Synced`);
+    } else if (!success) {
+      console.warn(`⚠️ 同步失败，但本地数据已保存`);
     }
     
-    console.log(`⭐ 星级已更新并同步: ${syncKey} → ${val}星`);
+    console.log(`⭐ 星级已更新: ${syncKey} → ${val}星`);
+  } else {
+    console.warn(`⚠️ 跳过云端同步: rowId=${rowId}, currentFile=${currentFile}`);
   }
   
+  console.log('ADLog-Edit: [setRating] ========== 结束 ==========');
   renderCards();
 }
 
