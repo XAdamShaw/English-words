@@ -1020,6 +1020,8 @@ const sw0 = document.getElementById('sw0');
 const sw1 = document.getElementById('sw1');
 const sw2 = document.getElementById('sw2');
 const sw3 = document.getElementById('sw3');
+const sw4 = document.getElementById('sw4'); // 牛皮纸主题
+const sw5 = document.getElementById('sw5'); // 泛黄树叶主题
 
 // ==================== View Toggle Functions ====================
 function toggleFixedViews() {
@@ -1543,6 +1545,14 @@ window.addEventListener('scroll', function() {
         currentRowNum = rowIndex;
         scrollSlider.value = rowIndex;
         updateRowInfo();
+        
+        // ✅ 记录位置到云端（滚动停止后500ms）
+        clearTimeout(window.positionSaveTimeout);
+        window.positionSaveTimeout = setTimeout(() => {
+          if (currentFile && rowIndex) {
+            saveLastViewedRow(rowIndex);
+          }
+        }, 500);
       }
     }
     
@@ -1569,8 +1579,29 @@ function checkAndLoadMore() {
 }
 
 // ==================== Card Rendering ====================
-function renderCards() {
+/**
+ * Render cards with optional position preservation
+ * @param {Object} options - Rendering options
+ * @param {boolean} options.preservePosition - Whether to preserve scroll position (default: false)
+ */
+function renderCards(options = {}) {
+  const { preservePosition = false } = options;
   const startTime = performance.now();
+  
+  // Save current position before re-rendering (if preservePosition is true)
+  let savedRowNum = null;
+  if (preservePosition && allItems.length > 0) {
+    // Find the first visible card's row number
+    const cards = document.querySelectorAll('.card');
+    for (const card of cards) {
+      const rect = card.getBoundingClientRect();
+      if (rect.top >= 0 && rect.top < window.innerHeight) {
+        savedRowNum = parseInt(card.dataset.rowIndex);
+        console.log(`💾 保存当前位置：第 ${savedRowNum} 行`);
+        break;
+      }
+    }
+  }
   
   if (!rows || !rows.length) {
     cardsEl.innerHTML = '';
@@ -1645,6 +1676,14 @@ function renderCards() {
   
   // Update scroll controls after rendering
   updateScrollControls();
+  
+  // Restore position if needed
+  if (preservePosition && savedRowNum) {
+    requestAnimationFrame(() => {
+      scrollToRow(savedRowNum, true); // true = immediate, no animation
+      console.log(`📍 已恢复到第 ${savedRowNum} 行`);
+    });
+  }
 }
 
 /**
@@ -1944,35 +1983,101 @@ async function setRating(id, val, rowId, syncStatusElement) {
   }
   
   console.log('ADLog-Edit: [setRating] ========== 结束 ==========');
-  renderCards();
+  // ✅ 修改星级时保持当前滚动位置
+  renderCards({ preservePosition: true });
 }
 
 // ==================== Theme Management ====================
+/**
+ * Theme configuration with centralized color management
+ */
+const themes = {
+  gradient: {
+    name: '渐变蓝紫',
+    background: 'linear-gradient(135deg,#4A90E2,#9013FE)',
+    //cardBg: 'rgba(255,255,255,0.95)',//	#1E90FF
+    cardBg: '#1E90FF',
+    text: 'var(--text-dark)',
+    textOnBg: 'var(--text-light)',
+    star: '#FFD700',
+    syncedIcon: '#4CAF50',
+    notSyncedIcon: '#9E9E9E'
+  },
+  white: {
+    name: '纯白色',
+    background: '#ffffff',
+    cardBg: 'rgba(255,255,255,0.95)',
+    text: 'var(--text-dark)',
+    textOnBg: 'var(--text-dark)',
+    star: '#FFD700',
+    syncedIcon: '#4CAF50',
+    notSyncedIcon: '#9E9E9E'
+  },
+  gray: {
+    name: '浅灰色',
+    background: '#e5e7eb',
+    cardBg: 'rgba(255,255,255,0.95)',
+    text: 'var(--text-dark)',
+    textOnBg: 'var(--text-dark)',
+    star: '#FFD700',
+    syncedIcon: '#4CAF50',
+    notSyncedIcon: '#9E9E9E'
+  },
+  dark: {
+    name: '深色模式',
+    background: '#0f172a',
+    cardBg: 'rgba(44,44,44,0.95)',
+    text: 'var(--text-light)',
+    textOnBg: 'var(--text-light)',
+    star: '#FFC107',
+    syncedIcon: '#66BB6A',
+    notSyncedIcon: '#757575'
+  },
+  kraft: {
+    name: '牛皮纸 📦',
+    background: '#D7BFA7',
+    cardBg: 'rgba(230,209,179,0.95)',
+    text: '#3E2F1C',
+    textOnBg: '#3E2F1C',
+    star: '#C49A6C',
+    syncedIcon: '#8B6914',
+    notSyncedIcon: '#A89070'
+  },
+  leaf: {
+    name: '泛黄树叶 🍂',
+    background: '#F7E8A4',
+    cardBg: 'rgba(255,242,199,0.95)',
+    text: '#5C4619',
+    textOnBg: '#5C4619',
+    star: '#D4A017',
+    syncedIcon: '#9B7C00',
+    notSyncedIcon: '#C4B088'
+  }
+};
+
+const themeKeys = Object.keys(themes);
+
 function applyTheme(index) {
-  if (index === 0) {
-    document.body.style.background = 'linear-gradient(135deg,#4A90E2,#9013FE)';
-    document.body.style.backgroundAttachment = 'fixed';
-    document.body.style.color = 'var(--text-light)';
-  }
-  if (index === 1) {
-    document.body.style.background = '#ffffff';
-    document.body.style.backgroundAttachment = 'fixed';
-    document.body.style.color = 'var(--text-dark)';
-  }
-  if (index === 2) {
-    document.body.style.background = '#e5e7eb';
-    document.body.style.backgroundAttachment = 'fixed';
-    document.body.style.color = 'var(--text-dark)';
-  }
-  if (index === 3) {
-    document.body.style.background = '#0f172a';
-    document.body.style.backgroundAttachment = 'fixed';
-    document.body.style.color = 'var(--text-light)';
+  const themeKey = themeKeys[index];
+  const theme = themes[themeKey];
+  
+  if (!theme) {
+    console.warn(`主题索引 ${index} 无效，使用默认主题`);
+    return;
   }
   
+  console.log(`应用主题: ${theme.name}`);
+  
+  // Apply background
+  document.body.style.background = theme.background;
+  document.body.style.backgroundAttachment = 'fixed';
+  document.body.style.color = theme.textOnBg;
+  
   // Adjust CSS variables for cards readability
-  const isLight = (index === 1 || index === 2);
-  document.documentElement.style.setProperty('--card-bg', isLight ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.36)');
+  // Light themes: white(1), gray(2), kraft(4), leaf(5)
+  // Dark themes: gradient(0), dark(3)
+  const isLight = [1, 2, 4, 5].includes(index);
+  document.documentElement.style.setProperty('--card-bg', theme.cardBg);
   document.documentElement.style.setProperty('--muted', isLight ? '#4b5563' : '#9aa4b2');
   
   // Update scroll control colors for light/dark theme
@@ -2022,7 +2127,8 @@ function applyTheme(index) {
   }
   
   // Force re-render to update text colors in cards
-  renderCards();
+  // ✅ 切换主题时保持当前滚动位置
+  renderCards({ preservePosition: true });
   
   // Save theme
   localStorage.setItem('csv_theme_v1', index);
@@ -2059,6 +2165,8 @@ sw0.addEventListener('click', () => applyTheme(0));
 sw1.addEventListener('click', () => applyTheme(1));
 sw2.addEventListener('click', () => applyTheme(2));
 sw3.addEventListener('click', () => applyTheme(3));
+sw4.addEventListener('click', () => applyTheme(4)); // 牛皮纸 📦
+sw5.addEventListener('click', () => applyTheme(5)); // 泛黄树叶 🍂
 
 // ==================== Mobile Layout Fix ====================
 /**
@@ -2355,7 +2463,8 @@ if (filterStarsSelect) {
     }
     
     // Re-render cards
-    renderCards();
+    // ✅ 筛选时保持当前滚动位置
+    renderCards({ preservePosition: true });
   });
 }
 
@@ -2379,7 +2488,8 @@ if (toggleSortByStarsCheckbox) {
     }
     
     // Re-render cards
-    renderCards();
+    // ✅ 排序时保持当前滚动位置
+    renderCards({ preservePosition: true });
   });
 }
 
