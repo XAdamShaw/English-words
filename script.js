@@ -510,8 +510,10 @@ async function updateSingleSyncRecord(key, record, options = {}) {
  * @returns {Promise<boolean>} Success status
  */
 async function updateSyncRecord(key, record, options = {}) {
+  console.log(`🔍 [updateSyncRecord] 开始: key=${key}, options=${JSON.stringify(options)}`);
   // Use optimized single record update
   const result = await updateSingleSyncRecord(key, record, options);
+  console.log(`🔍 [updateSyncRecord] updateSingleSyncRecord 返回: success=${result.success}`);
   return result.success;
 }
 
@@ -533,7 +535,7 @@ function isDataEqual(obj1, obj2) {
   }
   
   // Compare relevant fields
-  const keysToCompare = ['stars', 'filterLevel', 'sortByStars', 'lastViewedRow'];
+  const keysToCompare = ['stars', 'filterLevel', 'sortByStars', 'lastViewedRow', 'theme', 'showDefinition', 'showSentence', 'lastViewedId'];
   
   for (const key of keysToCompare) {
     console.log(`ADLog-Edit: [isDataEqual] 比较 ${key}: obj1.${key}=${obj1[key]}, obj2.${key}=${obj2[key]}`);
@@ -720,11 +722,156 @@ async function batchSyncFromCloud() {
         }
       }
       
+      // ✅ 恢复主题色（不触发保存到服务器，避免循环）
+      if (cloudSettings.theme !== undefined && cloudSettings.theme !== null) {
+        const themeIndex = Number(cloudSettings.theme);
+        if (themeIndex >= 0 && themeIndex <= 5) {
+          currentThemeIndex = themeIndex;
+          // 直接应用主题，不调用 applyTheme（避免触发保存到服务器）
+          const themeKey = themeKeys[themeIndex];
+          const theme = themes[themeKey];
+          if (theme) {
+            document.body.style.background = theme.background;
+            document.body.style.backgroundAttachment = 'fixed';
+            document.body.style.color = theme.textOnBg;
+            const isLight = [1, 2, 4, 5].includes(themeIndex);
+            document.documentElement.style.setProperty('--card-bg', theme.cardBg);
+            document.documentElement.style.setProperty('--muted', isLight ? '#4b5563' : '#9aa4b2');
+            
+            // Update scroll control colors
+            const scrollControl = document.querySelector('.scroll-control');
+            const header = document.querySelector('header');
+            const toggleViewBtnEl = document.getElementById('toggleViewBtn');
+            const floatingToggleBtnEl = document.getElementById('floatingToggleBtn');
+            
+            if (isLight) {
+              header.style.background = 'rgba(255,255,255,0.85)';
+              scrollControl.style.background = 'rgba(255,255,255,0.75)';
+              if (rowInfo) rowInfo.style.color = '#0f172a';
+              if (jumpInput) {
+                jumpInput.style.color = '#0f172a';
+                jumpInput.style.background = 'rgba(0,0,0,0.05)';
+                jumpInput.style.borderColor = 'rgba(0,0,0,0.15)';
+              }
+              if (toggleViewBtnEl) {
+                toggleViewBtnEl.style.background = 'rgba(0,0,0,0.08)';
+                toggleViewBtnEl.style.color = '#0f172a';
+                toggleViewBtnEl.style.borderColor = 'rgba(0,0,0,0.15)';
+              }
+              if (floatingToggleBtnEl) {
+                floatingToggleBtnEl.style.background = 'rgba(255,255,255,0.9)';
+                floatingToggleBtnEl.style.color = '#0f172a';
+                floatingToggleBtnEl.style.borderColor = 'rgba(0,0,0,0.2)';
+              }
+            } else {
+              header.style.background = 'rgba(0,0,0,0.25)';
+              scrollControl.style.background = 'rgba(0,0,0,0.2)';
+              if (rowInfo) rowInfo.style.color = '#fff';
+              if (jumpInput) {
+                jumpInput.style.color = '#fff';
+                jumpInput.style.background = 'rgba(255,255,255,0.1)';
+                jumpInput.style.borderColor = 'rgba(255,255,255,0.2)';
+              }
+              if (toggleViewBtnEl) {
+                toggleViewBtnEl.style.background = 'rgba(255,255,255,0.15)';
+                toggleViewBtnEl.style.color = '#fff';
+                toggleViewBtnEl.style.borderColor = 'rgba(255,255,255,0.2)';
+              }
+              if (floatingToggleBtnEl) {
+                floatingToggleBtnEl.style.background = 'rgba(0,0,0,0.6)';
+                floatingToggleBtnEl.style.color = '#fff';
+                floatingToggleBtnEl.style.borderColor = 'rgba(255,255,255,0.3)';
+              }
+            }
+            
+            localStorage.setItem('csv_theme_v1', themeIndex);
+            console.log(`🎨 从服务器恢复主题: ${themeIndex} (${theme.name})`);
+          }
+        }
+      }
+      
+      // ✅ 恢复显示/隐藏释义
+      if (cloudSettings.showDefinition !== undefined && cloudSettings.showDefinition !== null) {
+        showDefinition = Boolean(cloudSettings.showDefinition);
+        const toggleCheckbox = document.getElementById('toggleDefinition');
+        const label = document.getElementById('definitionLabel');
+        if (toggleCheckbox) {
+          toggleCheckbox.checked = showDefinition;
+        }
+        if (label) {
+          label.textContent = showDefinition ? '隐藏释义' : '显示释义';
+        }
+        // Update UI immediately
+        const definitionFields = document.querySelectorAll('.field-definition');
+        definitionFields.forEach(field => {
+          if (showDefinition) {
+            field.classList.remove('hidden-field');
+          } else {
+            field.classList.add('hidden-field');
+          }
+        });
+        console.log(`📝 从服务器恢复释义显示状态: ${showDefinition ? '显示' : '隐藏'}`);
+      }
+      
+      // ✅ 恢复显示/隐藏例句
+      if (cloudSettings.showSentence !== undefined && cloudSettings.showSentence !== null) {
+        showSentence = Boolean(cloudSettings.showSentence);
+        const toggleCheckbox = document.getElementById('toggleSentence');
+        const label = document.getElementById('sentenceLabel');
+        if (toggleCheckbox) {
+          toggleCheckbox.checked = showSentence;
+        }
+        if (label) {
+          label.textContent = showSentence ? '隐藏例句' : '显示例句';
+        }
+        // Update UI immediately
+        const sentenceFields = document.querySelectorAll('.field-sentence');
+        sentenceFields.forEach(field => {
+          if (showSentence) {
+            field.classList.remove('hidden-field');
+          } else {
+            field.classList.add('hidden-field');
+          }
+        });
+        console.log(`📄 从服务器恢复例句显示状态: ${showSentence ? '显示' : '隐藏'}`);
+      }
+      
       if (cloudSettings.lastViewedRow !== undefined && cloudSettings.lastViewedRow !== null) {
         lastViewedRow = cloudSettings.lastViewedRow;
       }
       
+      // ✅ 恢复 lastViewedId（如果存在）
+      let lastViewedId = null;
+      if (cloudSettings.lastViewedId !== undefined && cloudSettings.lastViewedId !== null) {
+        lastViewedId = String(cloudSettings.lastViewedId);
+      }
+      
       console.log('☁️ 全局设置已恢复:', cloudSettings);
+      
+      // ✅ 如果从服务器恢复了 lastViewedRow，需要更新 localStorage 和 header 显示
+      if (lastViewedRow !== null && lastViewedRow > 0 && allItems.length > 0) {
+        // 找到对应的 item（使用 rowNum，因为 lastViewedRow 是 1-based 的行号）
+        const targetItem = allItems.find(item => item.idx + 1 === lastViewedRow);
+        
+        if (targetItem) {
+          // 获取 CSV 中的原始 id 字段值
+          const csvId = targetItem.row['id'] !== undefined && targetItem.row['id'] !== null && targetItem.row['id'] !== '' 
+            ? targetItem.row['id'] 
+            : targetItem.idx;
+          
+          // 获取 word 字段值
+          const word = targetItem.row['word'] || '';
+          
+          // 如果服务器中有 lastViewedId，使用服务器的值；否则使用找到的 csvId
+          const finalId = lastViewedId || String(csvId);
+          
+          // 更新 localStorage
+          saveLastViewedRowInfo(lastViewedRow, finalId, word);
+          console.log(`📍 从服务器恢复浏览位置: 第 ${lastViewedRow} 行 (ID: ${finalId}, word: ${word})`);
+        } else {
+          console.warn(`⚠️ 在 allItems 中未找到第 ${lastViewedRow} 行的数据`);
+        }
+      }
     }
     
     // Restore ratings for all items
@@ -771,6 +918,9 @@ async function batchSyncFromCloud() {
       setTimeout(() => {
         scrollToRow(lastViewedRow);
         console.log(`📍 已滚动到上次浏览位置：第 ${lastViewedRow} 行`);
+        
+        // ✅ 滚动完成后更新 header 显示
+        updateLastViewedRowDisplay();
       }, 500); // Wait for rendering to complete
     }
     
@@ -824,11 +974,274 @@ function hideLoadingIndicator(indicator) {
  * Save last viewed row to cloud
  * @param {number} rowNum - Row number
  */
+/**
+ * Get last viewed row info from localStorage
+ * @returns {Object|null} { rowNum, id, word, csvFile } or null
+ */
+function getLastViewedRowInfo() {
+  try {
+    const data = loadJSON('last_viewed_row_info', null);
+    return data;
+  } catch (error) {
+    console.error('获取上次学习位置失败:', error);
+    return null;
+  }
+}
+
+/**
+ * Save last viewed row info to localStorage
+ * @param {number} rowNum - Row number
+ * @param {string} id - Item ID
+ * @param {string} word - Word text
+ */
+function saveLastViewedRowInfo(rowNum, id, word) {
+  try {
+    const data = {
+      rowNum,
+      id,
+      word,
+      csvFile: currentFile,
+      timestamp: Date.now()
+    };
+    saveJSON('last_viewed_row_info', data);
+  } catch (error) {
+    console.error('保存上次学习位置失败:', error);
+  }
+}
+
+/**
+ * Check if a row is already marked as last viewed row
+ * @param {string} id - Item ID
+ * @returns {boolean} True if already marked
+ */
+function isLastViewedRow(id) {
+  const info = getLastViewedRowInfo();
+  if (!info) return false;
+  
+  // Check if same CSV file and same ID
+  return info.csvFile === currentFile && info.id === id;
+}
+
+/**
+ * Update last viewed row with retry mechanism
+ * @param {number} rowNum - Row number
+ * @param {string} id - Item ID
+ * @param {string} word - Word text
+ * @returns {Promise<boolean>} Success status
+ */
+async function updateLastViewedRow(rowNum, id, word) {
+  console.log(`🔍 [updateLastViewedRow] 开始: rowNum=${rowNum}, id=${id}, word=${word}, currentFile=${currentFile}`);
+  
+  if (!currentFile) {
+    console.warn(`⚠️ [updateLastViewedRow] currentFile 为空，返回 false`);
+    return false;
+  }
+  
+  // ✅ 跨设备功能：总是调用接口，不进行本地检查
+  
+  const startTime = performance.now();
+  const maxRetries = 2;
+  let retryCount = 0;
+  let lastError = null;
+  
+  while (retryCount <= maxRetries) {
+    try {
+      const globalKey = `${currentFile.replace('.csv', '')}_settings`;
+      let settings = getSyncRecord(globalKey); // Now synchronous
+      
+      if (!settings) {
+        settings = {
+          key: globalKey,
+          filterLevel: filterStarsLevel,
+          sortByStars: sortByStars,
+          lastViewedRow: rowNum,
+          lastViewedId: String(id), // 保存ID用于下次比较
+          lastUpdated: new Date().toISOString()
+        };
+      } else {
+        // ✅ 跨设备功能：总是更新并调用接口，不进行本地检查
+        console.log(`🔍 [updateLastViewedRow] 更新现有设置: lastViewedRow=${settings.lastViewedRow} -> ${rowNum}, lastViewedId=${settings.lastViewedId} -> ${id}`);
+        settings.lastViewedRow = rowNum;
+        settings.lastViewedId = String(id); // 保存ID用于下次比较
+        settings.lastUpdated = new Date().toISOString();
+      }
+      
+      // ✅ 总是调用接口进行跨设备同步
+      console.log(`📍 [updateLastViewedRow] 准备调用 updateSyncRecord: key=${globalKey}, rowNum=${rowNum}, id=${id}`);
+      const success = await updateSyncRecord(globalKey, settings, { force: true }); // 使用 force 选项确保总是上传
+      console.log(`📍 [updateLastViewedRow] updateSyncRecord 返回: success=${success}`);
+      
+      if (success) {
+        // Update local storage only after successful cloud sync
+        saveLastViewedRowInfo(rowNum, id, word);
+        const elapsed = performance.now() - startTime;
+        console.log(`📍 保存浏览位置成功: 第 ${rowNum} 行 (${id})，耗时: ${elapsed.toFixed(2)}ms`);
+        
+        if (elapsed > 300) {
+          console.warn(`⚠️ 性能警告：保存浏览位置耗时超过 300ms`);
+        }
+        
+        // Update UI
+        updateLastViewedRowDisplay();
+        return true;
+      } else {
+        throw new Error('updateSyncRecord returned false');
+      }
+      
+    } catch (error) {
+      lastError = error;
+      retryCount++;
+      
+      // Retry on 429 or 5xx errors
+      if (error.status === 429 || (error.status >= 500 && error.status < 600)) {
+        const backoffMs = Math.min(1000 * Math.pow(2, retryCount - 1), 2000);
+        console.warn(`⚠️ 保存浏览位置失败 (${error.status}), ${backoffMs}ms 后重试 (${retryCount}/${maxRetries})`);
+        
+        if (retryCount <= maxRetries) {
+          await new Promise(resolve => setTimeout(resolve, backoffMs));
+          continue; // Retry
+        }
+      }
+      
+      // Non-retryable error or max retries reached
+      console.error(`❌ 保存浏览位置失败: ${error.message}`);
+      break;
+    }
+  }
+  
+  // All retries failed
+  console.error(`❌ 保存浏览位置失败，已重试 ${maxRetries} 次`, lastError);
+  return false;
+}
+
+/**
+ * Update last viewed row display UI
+ */
+function updateLastViewedRowDisplay() {
+  const displayEl = document.getElementById('lastViewedRowDisplay');
+  const rowNumEl = document.getElementById('lastViewedRowNum');
+  const idEl = document.getElementById('lastViewedId');
+  const wordEl = document.getElementById('lastViewedWord');
+  const jumpBtn = document.getElementById('jumpToLastViewedBtn');
+  
+  if (!displayEl || !rowNumEl || !idEl || !wordEl || !jumpBtn) {
+    return;
+  }
+  
+  const info = getLastViewedRowInfo();
+  
+  // Check if info exists and matches current CSV
+  if (!info || info.csvFile !== currentFile) {
+    displayEl.style.display = 'none';
+    return;
+  }
+  
+  // ✅ 检查ID是否存在：使用CSV中的原始id字段值进行匹配
+  const itemExists = allItems && allItems.some(item => {
+    const itemCsvId = item.row['id'] !== undefined && item.row['id'] !== null && item.row['id'] !== '' 
+      ? item.row['id'] 
+      : item.idx;
+    return String(itemCsvId) === String(info.id);
+  });
+  
+  if (!itemExists) {
+    // Record invalid - show message and hide jump button
+    rowNumEl.textContent = '记录失效';
+    idEl.textContent = '-';
+    wordEl.textContent = '-';
+    jumpBtn.style.display = 'none';
+    displayEl.style.display = 'flex';
+    return;
+  }
+  
+  // Valid record - show all info
+  rowNumEl.textContent = info.rowNum || '-';
+  idEl.textContent = info.id || '-'; // ✅ 显示CSV中的原始id字段值
+  wordEl.textContent = info.word || '-';
+  jumpBtn.style.display = 'inline-block';
+  displayEl.style.display = 'flex';
+}
+
+/**
+ * Jump to last viewed row
+ */
+function jumpToLastViewedRow() {
+  const info = getLastViewedRowInfo();
+  
+  if (!info || info.csvFile !== currentFile) {
+    console.warn('上次学习位置信息不存在或不属于当前CSV');
+    return;
+  }
+  
+  // ✅ 使用CSV中的原始id字段值进行匹配
+  const item = allItems && allItems.find(item => {
+    const itemCsvId = item.row['id'] !== undefined && item.row['id'] !== null && item.row['id'] !== '' 
+      ? item.row['id'] 
+      : item.idx;
+    return String(itemCsvId) === String(info.id);
+  });
+  
+  if (!item) {
+    console.warn('上次学习位置的ID在当前CSV中不存在');
+    updateLastViewedRowDisplay(); // Update UI to show "记录失效"
+    return;
+  }
+  
+  // Get the row number (1-based)
+  const rowNum = item.idx + 1;
+  
+  // Calculate distance for smooth scroll
+  const targetCard = cardsEl.querySelector(`.card[data-row-index="${rowNum}"]`);
+  
+  if (!targetCard) {
+    // Card not rendered yet, use immediate scroll
+    scrollToRow(rowNum, true);
+    return;
+  }
+  
+  const startPosition = window.pageYOffset;
+  const targetPosition = targetCard.getBoundingClientRect().top + window.pageYOffset - 120;
+  const distance = Math.abs(targetPosition - startPosition);
+  
+  // If distance is too large (> 5000px), use immediate scroll
+  if (distance > 5000) {
+    scrollToRow(rowNum, true);
+    return;
+  }
+  
+  // Smooth scroll with 0.5s duration
+  const duration = 500;
+  let startTimestamp = null;
+  
+  function animateScroll(timestamp) {
+    if (!startTimestamp) startTimestamp = timestamp;
+    const elapsed = timestamp - startTimestamp;
+    const progress = Math.min(elapsed / duration, 1);
+    
+    // Easing function (ease-in-out)
+    const easeInOut = progress < 0.5
+      ? 2 * progress * progress
+      : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+    
+    const currentPosition = startPosition + (targetPosition - startPosition) * easeInOut;
+    window.scrollTo(0, currentPosition);
+    
+    if (progress < 1) {
+      requestAnimationFrame(animateScroll);
+    }
+  }
+  
+  requestAnimationFrame(animateScroll);
+}
+
+/**
+ * Legacy function for backward compatibility
+ */
 async function saveLastViewedRow(rowNum) {
   if (!currentFile) return;
   
   const globalKey = `${currentFile.replace('.csv', '')}_settings`;
-  let settings = await getSyncRecord(globalKey);
+  let settings = getSyncRecord(globalKey); // Now synchronous
   
   if (!settings) {
     settings = {
@@ -1338,12 +1751,68 @@ async function loadFile(name, data) {
   rows = data;
   ratings = loadRatings(name) || {};
   
+  // ✅ 先创建 allItems，这样 batchSyncFromCloud 可以访问到数据
+  // Extract header row (first row) and data rows
+  const headerRow = rows.length > 0 ? rows[0] : [];
+  const dataRows = rows.length > 1 ? rows.slice(1) : [];
+  
+  // Create header mapping (column name to index)
+  const headerMap = {};
+  headerRow.forEach((colName, idx) => {
+    headerMap[colName] = idx;
+  });
+  
+  // Build items: convert each CSV row to object with named fields
+  allItems = dataRows.map((r, idx) => {
+    // Convert array row to object using header names
+    const rowObj = {};
+    headerRow.forEach((colName, colIdx) => {
+      rowObj[colName] = r[colIdx];
+    });
+    
+    return {
+      idx,           // Original index (for compatibility)
+      row: rowObj,   // Row as object with named fields
+      rowArray: r,   // Keep original array for rowId compatibility
+      id: rowId(currentFile || 'nofile', r)
+    };
+  });
+  
+  // Ensure ratings default
+  allItems.forEach(it => {
+    if (ratings[it.id] === undefined) ratings[it.id] = 0;
+  });
+  
+  // ✅ 先不应用筛选和排序，保持原始数据
+  // 等从服务器恢复设置后，再应用筛选和排序
+  
   // Batch sync from cloud BEFORE rendering
   // This ensures syncCache is populated when checkSyncStatus is called
   await batchSyncFromCloud();
   
+  // ✅ 从服务器恢复设置后，应用筛选和排序
+  // Apply filter if enabled
+  if (filterStarsLevel !== 'all') {
+    const targetStars = parseInt(filterStarsLevel);
+    allItems = allItems.filter(it => (ratings[it.id] || 0) === targetStars);
+    console.log(`筛选${targetStars}星单词，剩余 ${allItems.length} 条`);
+  }
+  
+  // Sort by stars if enabled, otherwise keep original order
+  if (sortByStars) {
+    allItems.sort((a, b) => (ratings[b.id] || 0) - (ratings[a.id] || 0) || a.idx - b.idx);
+    console.log('按星级排序');
+  } else {
+    // Keep original order (sorted by idx)
+    allItems.sort((a, b) => a.idx - b.idx);
+    console.log('按原始顺序');
+  }
+  
   // Now render with cloud data already in cache
   renderCards();
+  
+  // Update last viewed row display after rendering
+  updateLastViewedRowDisplay();
 }
 
 // ==================== Scroll Control Functions ====================
@@ -1488,8 +1957,8 @@ function scrollToRow(rowNum, forceImmediate = false) {
       console.warn(`响应时间警告：即时跳转耗时 ${scrollTime.toFixed(2)}ms，超过 100ms 目标`);
     }
     
-    // Save last viewed row to cloud (async, don't block)
-    saveLastViewedRow(rowNum);
+    // ✅ 已移除：不再在 scrollToRow 时自动记录位置
+    // 位置记录仅在点击发音按钮时触发
     
     return true;
   } else {
@@ -1519,8 +1988,8 @@ function scrollToRow(rowNum, forceImmediate = false) {
         const scrollTime = performance.now() - startTime;
         console.log(`平滑滚动到第 ${rowNum} 行，总耗时 ${scrollTime.toFixed(2)}ms`);
         
-        // Save last viewed row to cloud after animation completes
-        saveLastViewedRow(rowNum);
+        // ✅ 已移除：不再在 scrollToRow 动画完成后自动记录位置
+        // 位置记录仅在点击发音按钮时触发
       }
     }
     
@@ -1619,13 +2088,8 @@ window.addEventListener('scroll', function() {
         scrollSlider.value = rowIndex;
         updateRowInfo();
         
-        // ✅ 记录位置到云端（滚动停止后500ms）
-        clearTimeout(window.positionSaveTimeout);
-        window.positionSaveTimeout = setTimeout(() => {
-          if (currentFile && rowIndex) {
-            saveLastViewedRow(rowIndex);
-          }
-        }, 500);
+        // ✅ 已移除：不再在滚动时自动记录位置
+        // 位置记录仅在点击发音按钮时触发
       }
     }
     
@@ -1685,55 +2149,60 @@ function renderCards(options = {}) {
     emptyEl.style.display = 'none';
   }
   
-  // Extract header row (first row) and data rows
-  const headerRow = rows.length > 0 ? rows[0] : [];
-  const dataRows = rows.length > 1 ? rows.slice(1) : [];
-  
-  // Create header mapping (column name to index)
-  const headerMap = {};
-  headerRow.forEach((colName, idx) => {
-    headerMap[colName] = idx;
-  });
-  
-  console.log('CSV标题行:', headerRow);
-  console.log('标题映射:', headerMap);
-  
-  // Build items: convert each CSV row to object with named fields
-  allItems = dataRows.map((r, idx) => {
-    // Convert array row to object using header names
-    const rowObj = {};
-    headerRow.forEach((colName, colIdx) => {
-      rowObj[colName] = r[colIdx];
+  // ✅ 如果 allItems 已经在 loadFile 中创建，就跳过创建逻辑
+  if (allItems.length === 0) {
+    // Extract header row (first row) and data rows
+    const headerRow = rows.length > 0 ? rows[0] : [];
+    const dataRows = rows.length > 1 ? rows.slice(1) : [];
+    
+    // Create header mapping (column name to index)
+    const headerMap = {};
+    headerRow.forEach((colName, idx) => {
+      headerMap[colName] = idx;
     });
     
-    return {
-      idx,           // Original index (for compatibility)
-      row: rowObj,   // Row as object with named fields
-      rowArray: r,   // Keep original array for rowId compatibility
-      id: rowId(currentFile || 'nofile', r)
-    };
-  });
-  
-  // Ensure ratings default
-  allItems.forEach(it => {
-    if (ratings[it.id] === undefined) ratings[it.id] = 0;
-  });
-  
-  // Apply filter if enabled
-  if (filterStarsLevel !== 'all') {
-    const targetStars = parseInt(filterStarsLevel);
-    allItems = allItems.filter(it => (ratings[it.id] || 0) === targetStars);
-    console.log(`筛选${targetStars}星单词，剩余 ${allItems.length} 条`);
-  }
-  
-  // Sort by stars if enabled, otherwise keep original order
-  if (sortByStars) {
-    allItems.sort((a, b) => (ratings[b.id] || 0) - (ratings[a.id] || 0) || a.idx - b.idx);
-    console.log('按星级排序');
+    console.log('CSV标题行:', headerRow);
+    console.log('标题映射:', headerMap);
+    
+    // Build items: convert each CSV row to object with named fields
+    allItems = dataRows.map((r, idx) => {
+      // Convert array row to object using header names
+      const rowObj = {};
+      headerRow.forEach((colName, colIdx) => {
+        rowObj[colName] = r[colIdx];
+      });
+      
+      return {
+        idx,           // Original index (for compatibility)
+        row: rowObj,   // Row as object with named fields
+        rowArray: r,   // Keep original array for rowId compatibility
+        id: rowId(currentFile || 'nofile', r)
+      };
+    });
+    
+    // Ensure ratings default
+    allItems.forEach(it => {
+      if (ratings[it.id] === undefined) ratings[it.id] = 0;
+    });
+    
+    // Apply filter if enabled
+    if (filterStarsLevel !== 'all') {
+      const targetStars = parseInt(filterStarsLevel);
+      allItems = allItems.filter(it => (ratings[it.id] || 0) === targetStars);
+      console.log(`筛选${targetStars}星单词，剩余 ${allItems.length} 条`);
+    }
+    
+    // Sort by stars if enabled, otherwise keep original order
+    if (sortByStars) {
+      allItems.sort((a, b) => (ratings[b.id] || 0) - (ratings[a.id] || 0) || a.idx - b.idx);
+      console.log('按星级排序');
+    } else {
+      // Keep original order (sorted by idx)
+      allItems.sort((a, b) => a.idx - b.idx);
+      console.log('按原始顺序');
+    }
   } else {
-    // Keep original order (sorted by idx)
-    allItems.sort((a, b) => a.idx - b.idx);
-    console.log('按原始顺序');
+    console.log(`✅ 使用已创建的 allItems: ${allItems.length} 条`);
   }
   
   // Reset and render first batch
@@ -1855,12 +2324,28 @@ function renderNextBatch() {
         speakBtn.title = '朗读单词';
         speakBtn.setAttribute('aria-label', '朗读');
         
-        speakBtn.addEventListener('click', (e) => {
+        speakBtn.addEventListener('click', async (e) => {
           e.stopPropagation(); // Prevent card click events
           
           try {
             const textToSpeak = getCell('word');
+            // ✅ 使用CSV中的原始id字段值，而不是文件名拼接的ID
+            const csvId = it.row['id'] !== undefined && it.row['id'] !== null && it.row['id'] !== '' 
+              ? it.row['id'] 
+              : it.idx;
+            const rowId = it.idx + 1; // 1-based row number
+            
+            // Start speaking immediately (optimistic)
             speakText(textToSpeak, speakBtn);
+            
+            // Update last viewed row (async, non-blocking)
+            // ✅ 总是调用接口，因为这是跨设备功能
+            console.log(`🔊 [发音按钮] 准备调用 updateLastViewedRow: rowId=${rowId}, csvId=${csvId}, word=${textToSpeak}`);
+            updateLastViewedRow(rowId, csvId, textToSpeak).then(success => {
+              console.log(`🔊 [发音按钮] updateLastViewedRow 完成: success=${success}`);
+            }).catch(error => {
+              console.error('🔊 [发音按钮] 更新浏览位置失败:', error);
+            });
           } catch (error) {
             console.error('朗读按钮点击处理异常:', error);
           }
@@ -2163,6 +2648,9 @@ function applyTheme(index) {
   
   console.log(`应用主题: ${theme.name}`);
   
+  // Update current theme index
+  currentThemeIndex = index;
+  
   // Apply background
   document.body.style.background = theme.background;
   document.body.style.backgroundAttachment = 'fixed';
@@ -2225,8 +2713,21 @@ function applyTheme(index) {
   // ✅ 切换主题时保持当前滚动位置
   renderCards({ preservePosition: true });
   
-  // Save theme
+  // Update last viewed row display (persists across theme changes)
+  updateLastViewedRowDisplay();
+  
+  // Save theme to localStorage
   localStorage.setItem('csv_theme_v1', index);
+  
+  // ✅ 保存主题到服务器（如果当前有文件）
+  console.log(`🎨 [applyTheme] 准备保存主题到服务器: currentFile=${currentFile}, themeIndex=${index}`);
+  if (currentFile) {
+    updateGlobalSettings().catch(error => {
+      console.error('❌ [applyTheme] 保存主题到服务器失败:', error);
+    });
+  } else {
+    console.warn(`⚠️ [applyTheme] currentFile 为空，无法保存主题到服务器`);
+  }
 }
 
 // ==================== Event Listeners ====================
@@ -2253,6 +2754,14 @@ if (toggleViewBtn) {
 
 if (floatingToggleBtn) {
   floatingToggleBtn.addEventListener('click', toggleFixedViews);
+}
+
+// Jump to last viewed row button
+const jumpToLastViewedBtn = document.getElementById('jumpToLastViewedBtn');
+if (jumpToLastViewedBtn) {
+  jumpToLastViewedBtn.addEventListener('click', () => {
+    jumpToLastViewedRow();
+  });
 }
 
 // Theme switchers
@@ -2350,6 +2859,16 @@ function toggleDefinitionField() {
   // Save state to localStorage
   localStorage.setItem('csv_show_definition_v1', showDefinition);
   
+  // ✅ 保存到服务器（如果当前有文件）
+  console.log(`📝 [toggleDefinitionField] 准备保存到服务器: currentFile=${currentFile}, showDefinition=${showDefinition}`);
+  if (currentFile) {
+    updateGlobalSettings().catch(error => {
+      console.error('❌ [toggleDefinitionField] 保存释义显示状态到服务器失败:', error);
+    });
+  } else {
+    console.warn(`⚠️ [toggleDefinitionField] currentFile 为空，无法保存到服务器`);
+  }
+  
   console.log(`释义字段${showDefinition ? '显示' : '隐藏'}`);
 }
 
@@ -2385,26 +2904,71 @@ function toggleSentenceField() {
   // Save state to localStorage
   localStorage.setItem('csv_show_sentence_v1', showSentence);
   
+  // ✅ 保存到服务器（如果当前有文件）
+  console.log(`📄 [toggleSentenceField] 准备保存到服务器: currentFile=${currentFile}, showSentence=${showSentence}`);
+  if (currentFile) {
+    updateGlobalSettings().catch(error => {
+      console.error('❌ [toggleSentenceField] 保存例句显示状态到服务器失败:', error);
+    });
+  } else {
+    console.warn(`⚠️ [toggleSentenceField] currentFile 为空，无法保存到服务器`);
+  }
+  
   console.log(`例句字段${showSentence ? '显示' : '隐藏'}`);
 }
 
 /**
  * Update global settings to JSONBin.io
- * This stores file-level settings like filterLevel and sortByStars
+ * This stores file-level settings like filterLevel, sortByStars, theme, showDefinition, showSentence
  */
 async function updateGlobalSettings() {
-  if (!currentFile) return;
+  console.log(`🔍 [updateGlobalSettings] 开始调用: currentFile=${currentFile}`);
+  
+  if (!currentFile) {
+    console.warn(`⚠️ [updateGlobalSettings] currentFile 为空，跳过保存`);
+    return;
+  }
   
   const globalKey = `${currentFile.replace('.csv', '')}_settings`;
-  const settings = {
-    key: globalKey,
-    filterLevel: filterStarsLevel,
-    sortByStars: sortByStars,
-    lastUpdated: new Date().toISOString()
-  };
+  console.log(`🔍 [updateGlobalSettings] globalKey=${globalKey}`);
   
-  await updateSyncRecord(globalKey, settings);
-  console.log(`💾 全局设置已同步: ${globalKey}`, settings);
+  const existingSettings = getSyncRecord(globalKey); // Get existing settings (may be from cache)
+  console.log(`🔍 [updateGlobalSettings] 现有设置:`, existingSettings);
+  
+  // ✅ 创建新对象，避免直接修改缓存中的对象引用
+  let settings;
+  if (!existingSettings) {
+    settings = {
+      key: globalKey,
+      filterLevel: filterStarsLevel,
+      sortByStars: sortByStars,
+      theme: currentThemeIndex,
+      showDefinition: showDefinition,
+      showSentence: showSentence,
+      lastUpdated: new Date().toISOString()
+    };
+    console.log(`🔍 [updateGlobalSettings] 创建新设置:`, settings);
+  } else {
+    // ✅ 创建新对象，而不是直接修改 existingSettings（避免修改缓存引用）
+    settings = {
+      key: globalKey,
+      filterLevel: filterStarsLevel,
+      sortByStars: sortByStars,
+      theme: currentThemeIndex !== undefined ? currentThemeIndex : 0,
+      showDefinition: showDefinition,
+      showSentence: showSentence,
+      // 保留其他可能存在的字段（如 lastViewedRow, lastViewedId）
+      ...(existingSettings.lastViewedRow !== undefined && { lastViewedRow: existingSettings.lastViewedRow }),
+      ...(existingSettings.lastViewedId !== undefined && { lastViewedId: existingSettings.lastViewedId }),
+      lastUpdated: new Date().toISOString()
+    };
+    console.log(`🔍 [updateGlobalSettings] 更新现有设置（创建新对象）:`, settings);
+    console.log(`🔍 [updateGlobalSettings] 原设置:`, existingSettings);
+  }
+  
+  console.log(`🔍 [updateGlobalSettings] 准备调用 updateSyncRecord: key=${globalKey}`);
+  const result = await updateSyncRecord(globalKey, settings);
+  console.log(`💾 [updateGlobalSettings] 全局设置已同步: ${globalKey}, result=${result}`, settings);
 }
 
 /**
@@ -2547,14 +3111,19 @@ const toggleSortByStarsCheckbox = document.getElementById('toggleSortByStars');
 if (filterStarsSelect) {
   filterStarsSelect.addEventListener('change', (e) => {
     filterStarsLevel = e.target.value;
-    console.log(`筛选级别变更: ${filterStarsLevel}`);
+    console.log(`🔍 [filterStarsSelect] 筛选级别变更: ${filterStarsLevel}, currentFile=${currentFile}`);
     
     // Save to localStorage
     localStorage.setItem('csv_filter_level_v1', filterStarsLevel);
     
     // Sync to cloud if currentFile exists
     if (currentFile) {
-      updateGlobalSettings();
+      console.log(`🔍 [filterStarsSelect] 准备调用 updateGlobalSettings`);
+      updateGlobalSettings().catch(error => {
+        console.error('❌ [filterStarsSelect] 保存筛选级别到服务器失败:', error);
+      });
+    } else {
+      console.warn(`⚠️ [filterStarsSelect] currentFile 为空，无法保存到服务器`);
     }
     
     // Re-render cards
@@ -2566,7 +3135,7 @@ if (filterStarsSelect) {
 if (toggleSortByStarsCheckbox) {
   toggleSortByStarsCheckbox.addEventListener('change', (e) => {
     sortByStars = e.target.checked;
-    console.log(`星级排序: ${sortByStars ? '开启' : '关闭'}`);
+    console.log(`🔍 [toggleSortByStarsCheckbox] 星级排序: ${sortByStars ? '开启' : '关闭'}, currentFile=${currentFile}`);
     
     // Update label
     const sortLabel = document.getElementById('sortLabel');
@@ -2579,7 +3148,12 @@ if (toggleSortByStarsCheckbox) {
     
     // Sync to cloud if currentFile exists
     if (currentFile) {
-      updateGlobalSettings();
+      console.log(`🔍 [toggleSortByStarsCheckbox] 准备调用 updateGlobalSettings`);
+      updateGlobalSettings().catch(error => {
+        console.error('❌ [toggleSortByStarsCheckbox] 保存排序状态到服务器失败:', error);
+      });
+    } else {
+      console.warn(`⚠️ [toggleSortByStarsCheckbox] currentFile 为空，无法保存到服务器`);
     }
     
     // Re-render cards

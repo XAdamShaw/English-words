@@ -156,6 +156,56 @@ header.hidden {
 }
 
 /* ==================== Hide/Show Toggle Buttons ==================== */
+/* Last Viewed Row Display */
+.last-viewed-row-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+.last-viewed-label {
+  font-weight: 500;
+  color: var(--text-light);
+}
+
+.last-viewed-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--text-light);
+}
+
+.last-viewed-row,
+.last-viewed-id,
+.last-viewed-word {
+  white-space: nowrap;
+}
+
+.jump-to-last-viewed-btn {
+  background: rgba(255,255,255,0.2);
+  color: var(--text-light);
+  border: 1px solid rgba(255,255,255,0.3);
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.jump-to-last-viewed-btn:hover {
+  background: rgba(255,255,255,0.3);
+  transform: translateY(-1px);
+}
+
 .toggle-view-btn {
   background: rgba(255,255,255,0.15);
   color: var(--text-light);
@@ -739,6 +789,22 @@ input[type=file] {
     align-self: flex-end;
     font-size: 11px;
     padding: 4px 8px;
+  }
+  
+  .last-viewed-row-display {
+    font-size: 10px;
+    padding: 4px 8px;
+    gap: 6px;
+  }
+  
+  .last-viewed-content {
+    gap: 6px;
+    font-size: 10px;
+  }
+  
+  .jump-to-last-viewed-btn {
+    font-size: 10px;
+    padding: 3px 8px;
   }
   
   .bg-picker {
