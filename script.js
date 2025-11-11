@@ -1361,7 +1361,8 @@ let filterStarsLevel = 'all'; // Track filter level (0-5 or 'all')
 let sortByStars = false; // Track if sorting by stars
 
 // Performance optimization: Virtual scrolling
-let allItems = []; // All sorted items
+let allItems = []; // All sorted items (after filter/sort)
+let allItemsOriginal = []; // Original items (before filter/sort) - used for re-filtering
 let displayedItems = []; // Currently displayed items
 let currentBatch = 0; // Current batch index
 const BATCH_SIZE = 100; // Items per batch
@@ -1783,6 +1784,9 @@ async function loadFile(name, data) {
     if (ratings[it.id] === undefined) ratings[it.id] = 0;
   });
   
+  // ✅ 保存原始数据（未筛选、未排序）
+  allItemsOriginal = [...allItems];
+  
   // ✅ 先不应用筛选和排序，保持原始数据
   // 等从服务器恢复设置后，再应用筛选和排序
   
@@ -1791,6 +1795,23 @@ async function loadFile(name, data) {
   await batchSyncFromCloud();
   
   // ✅ 从服务器恢复设置后，应用筛选和排序
+  applyFilterAndSort();
+  
+  // Now render with cloud data already in cache
+  renderCards();
+  
+  // Update last viewed row display after rendering
+  updateLastViewedRowDisplay();
+}
+
+/**
+ * Apply filter and sort to allItems based on current settings
+ * This function should be called whenever filterStarsLevel or sortByStars changes
+ */
+function applyFilterAndSort() {
+  // ✅ 从原始数据开始，重新应用筛选和排序
+  allItems = [...allItemsOriginal];
+  
   // Apply filter if enabled
   if (filterStarsLevel !== 'all') {
     const targetStars = parseInt(filterStarsLevel);
@@ -1807,12 +1828,6 @@ async function loadFile(name, data) {
     allItems.sort((a, b) => a.idx - b.idx);
     console.log('按原始顺序');
   }
-  
-  // Now render with cloud data already in cache
-  renderCards();
-  
-  // Update last viewed row display after rendering
-  updateLastViewedRowDisplay();
 }
 
 // ==================== Scroll Control Functions ====================
@@ -2185,24 +2200,15 @@ function renderCards(options = {}) {
       if (ratings[it.id] === undefined) ratings[it.id] = 0;
     });
     
-    // Apply filter if enabled
-    if (filterStarsLevel !== 'all') {
-      const targetStars = parseInt(filterStarsLevel);
-      allItems = allItems.filter(it => (ratings[it.id] || 0) === targetStars);
-      console.log(`筛选${targetStars}星单词，剩余 ${allItems.length} 条`);
-    }
+    // ✅ 保存原始数据
+    allItemsOriginal = [...allItems];
     
-    // Sort by stars if enabled, otherwise keep original order
-    if (sortByStars) {
-      allItems.sort((a, b) => (ratings[b.id] || 0) - (ratings[a.id] || 0) || a.idx - b.idx);
-      console.log('按星级排序');
-    } else {
-      // Keep original order (sorted by idx)
-      allItems.sort((a, b) => a.idx - b.idx);
-      console.log('按原始顺序');
-    }
+    // Apply filter and sort
+    applyFilterAndSort();
   } else {
-    console.log(`✅ 使用已创建的 allItems: ${allItems.length} 条`);
+    console.log(`✅ 使用已创建的 allItemsOriginal: ${allItemsOriginal.length} 条`);
+    // ✅ 从原始数据重新应用筛选和排序
+    applyFilterAndSort();
   }
   
   // Reset and render first batch
@@ -3116,6 +3122,9 @@ if (filterStarsSelect) {
     // Save to localStorage
     localStorage.setItem('csv_filter_level_v1', filterStarsLevel);
     
+    // ✅ 先应用筛选和排序
+    applyFilterAndSort();
+    
     // Sync to cloud if currentFile exists
     if (currentFile) {
       console.log(`🔍 [filterStarsSelect] 准备调用 updateGlobalSettings`);
@@ -3145,6 +3154,9 @@ if (toggleSortByStarsCheckbox) {
     
     // Save to localStorage
     localStorage.setItem('csv_sort_by_stars_v1', sortByStars);
+    
+    // ✅ 先应用筛选和排序
+    applyFilterAndSort();
     
     // Sync to cloud if currentFile exists
     if (currentFile) {
