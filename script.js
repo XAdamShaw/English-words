@@ -346,14 +346,14 @@ async function updateAllSyncData(allData) {
 }
 
 /**
- * Get sync record for a specific key
+ * Get sync record for a specific key (only from cache, no network request)
  * @param {string} key - Unique key
- * @returns {Promise<Object|null>} Sync record or null
+ * @returns {Object|null} Sync record or null
  */
-async function getSyncRecord(key) {
+function getSyncRecord(key) {
   console.log(`ADLog-Edit: [getSyncRecord] 获取记录: ${key}`);
   
-  // Check in-memory cache first
+  // Only check in-memory cache (no network request)
   if (syncCache[key]) {
     console.log(`ADLog-Edit: [getSyncRecord] ✅ 在缓存中找到`);
     console.log(`ADLog-Edit: [getSyncRecord] 返回对象:`, JSON.stringify(syncCache[key]));
@@ -361,85 +361,158 @@ async function getSyncRecord(key) {
     return syncCache[key];
   }
 
-  console.log(`ADLog-Edit: [getSyncRecord] ❌ 缓存中未找到，准备 fetch...`);
-  // Fetch from JSONBin.io
-  const allData = await fetchAllSyncData();
-  if (!allData) {
-    console.log(`ADLog-Edit: [getSyncRecord] fetchAllSyncData 返回空，返回 null`);
-    return null;
-  }
-
-  // Update cache
-  syncCache = allData;
-  console.log(`ADLog-Edit: [getSyncRecord] 已更新缓存`);
-
-  const result = allData[key] || null;
-  console.log(`ADLog-Edit: [getSyncRecord] 返回:`, result ? JSON.stringify(result) : 'null');
-  return result;
+  console.log(`ADLog-Edit: [getSyncRecord] ❌ 缓存中未找到，返回 null`);
+  return null;
 }
 
 /**
- * Update or create sync record (with change detection)
+ * Update single sync record to cloud (optimized: only sends single record)
+ * @param {string} key - Unique key
+ * @param {Object} record - Record data
+ * @param {Object} options - Update options
+ * @returns {Promise<{success: boolean, record: Object|null}>} Success status and updated record
+ */
+async function updateSingleSyncRecord(key, record, options = {}) {
+  console.log('ADLog-Edit: [updateSingleSyncRecord] ========== 开始 ==========');
+  console.log('ADLog-Edit: [updateSingleSyncRecord] key =', key);
+  console.log('ADLog-Edit: [updateSingleSyncRecord] record =', JSON.stringify(record));
+  console.log('ADLog-Edit: [updateSingleSyncRecord] options =', options);
+  
+  // Check if data actually changed
+  const existingData = syncCache[key];
+  console.log('ADLog-Edit: [updateSingleSyncRecord] existingData =', JSON.stringify(existingData));
+  
+  if (existingData && !options.force) {
+    console.log('ADLog-Edit: [updateSingleSyncRecord] 准备比较数据是否变更...');
+    // Compare data to detect changes
+    const hasChanged = !isDataEqual(existingData, record);
+    console.log('ADLog-Edit: [updateSingleSyncRecord] hasChanged =', hasChanged);
+    
+    if (!hasChanged) {
+      console.log('ADLog-Edit: [updateSingleSyncRecord] ⏭️  数据未变更，跳过同步');
+      console.log(`⏭️  跳过同步（数据未变更）: ${key}`);
+      syncCacheModified[key] = false;
+      return { success: true, record: existingData }; // Return existing record
+    }
+  } else {
+    console.log('ADLog-Edit: [updateSingleSyncRecord] 跳过变更检测（existingData 为空或 force=true）');
+  }
+  
+  // Mark as modified
+  syncCacheModified[key] = true;
+  console.log('ADLog-Edit: [updateSingleSyncRecord] 标记为已修改');
+  
+  // Update in-memory cache first (optimistic update)
+  syncCache[key] = record;
+  console.log('ADLog-Edit: [updateSingleSyncRecord] 已更新内存缓存');
+  
+  console.log(`🔄 准备同步单条数据到云端: ${key}`, record);
+
+  // Retry with exponential backoff (max 3 retries)
+  const maxRetries = 3;
+  let retryCount = 0;
+  let lastError = null;
+  
+  while (retryCount <= maxRetries) {
+    try {
+      const startTime = performance.now();
+      
+      // Enqueue the request with timeout
+      const response = await requestQueue.enqueue(async () => {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+        
+        try {
+          const response = await fetch(`${CLOUDFLARE_WORKER_URL}/update`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ key, record }),
+            signal: controller.signal
+          });
+          
+          clearTimeout(timeoutId);
+          
+          if (response.status === 429) {
+            const error = new Error('Too Many Requests');
+            error.status = 429;
+            throw error;
+          }
+          
+          if (!response.ok) {
+            const error = new Error(`HTTP ${response.status}: ${response.statusText}`);
+            error.status = response.status;
+            throw error;
+          }
+          
+          const data = await response.json();
+          const elapsed = performance.now() - startTime;
+          console.log(`ADLog-Edit: [updateSingleSyncRecord] ✅ 同步成功！耗时: ${elapsed.toFixed(2)}ms`);
+          
+          // Update cache with returned record (in case server modified it)
+          if (data.record) {
+            syncCache[key] = data.record;
+          }
+          
+          syncCacheModified[key] = false; // Reset modified flag after successful sync
+          
+          return { success: true, record: data.record || record };
+          
+        } catch (error) {
+          clearTimeout(timeoutId);
+          if (error.name === 'AbortError') {
+            throw new Error('Request timeout (5s)');
+          }
+          throw error;
+        }
+      });
+      
+      if (response.success) {
+        console.log(`✅ 同步单条记录成功: ${key}`, response.record);
+        return response;
+      }
+      
+      // If enqueue returned false, retry
+      throw new Error('Request queue rejected');
+      
+    } catch (error) {
+      lastError = error;
+      retryCount++;
+      
+      if (error.status === 429 || error.status >= 500) {
+        // Exponential backoff: 1s, 2s, 4s
+        const backoffMs = Math.min(1000 * Math.pow(2, retryCount - 1), 4000);
+        console.warn(`ADLog-Edit: [updateSingleSyncRecord] ⚠️ 请求失败 (${error.status}), ${backoffMs}ms 后重试 (${retryCount}/${maxRetries})`);
+        
+        if (retryCount <= maxRetries) {
+          await new Promise(resolve => setTimeout(resolve, backoffMs));
+          continue; // Retry
+        }
+      }
+      
+      // Non-retryable error or max retries reached
+      console.error(`ADLog-Edit: [updateSingleSyncRecord] ❌ 同步失败: ${error.message}`);
+      break;
+    }
+  }
+  
+  // All retries failed
+  console.warn(`⚠️ 同步失败，数据已保存到本地缓存: ${key}`, lastError);
+  return { success: false, record: record }; // Return local record even on failure
+}
+
+/**
+ * Update or create sync record (legacy function, for backward compatibility)
  * @param {string} key - Unique key
  * @param {Object} record - Record data
  * @param {Object} options - Update options
  * @returns {Promise<boolean>} Success status
  */
 async function updateSyncRecord(key, record, options = {}) {
-  console.log('ADLog-Edit: [updateSyncRecord] ========== 开始 ==========');
-  console.log('ADLog-Edit: [updateSyncRecord] key =', key);
-  console.log('ADLog-Edit: [updateSyncRecord] record =', JSON.stringify(record));
-  console.log('ADLog-Edit: [updateSyncRecord] options =', options);
-  
-  // Check if data actually changed
-  const existingData = syncCache[key];
-  console.log('ADLog-Edit: [updateSyncRecord] existingData =', JSON.stringify(existingData));
-  console.log('ADLog-Edit: [updateSyncRecord] existingData === record?', existingData === record);
-  
-  if (existingData && !options.force) {
-    console.log('ADLog-Edit: [updateSyncRecord] 准备比较数据是否变更...');
-    // Compare data to detect changes
-    const hasChanged = !isDataEqual(existingData, record);
-    console.log('ADLog-Edit: [updateSyncRecord] hasChanged =', hasChanged);
-    
-    if (!hasChanged) {
-      console.log('ADLog-Edit: [updateSyncRecord] ⏭️  数据未变更，跳过同步');
-      console.log(`⏭️  跳过同步（数据未变更）: ${key}`);
-      syncCacheModified[key] = false;
-      return true; // Return success since data is already up-to-date
-    }
-  } else {
-    console.log('ADLog-Edit: [updateSyncRecord] 跳过变更检测（existingData 为空或 force=true）');
-  }
-  
-  // Mark as modified
-  syncCacheModified[key] = true;
-  console.log('ADLog-Edit: [updateSyncRecord] 标记为已修改');
-  
-  // Update in-memory cache first
-  syncCache[key] = record;
-  console.log('ADLog-Edit: [updateSyncRecord] 已更新内存缓存');
-  
-  console.log(`🔄 准备同步到云端: ${key}`, record);
-
-  // Use existing syncCache instead of fetching again
-  // This avoids unnecessary network requests and potential failures
-  const allData = { ...syncCache };
-  console.log('ADLog-Edit: [updateSyncRecord] 准备调用 updateAllSyncData...');
-
-  // Update to JSONBin.io (with queue management)
-  const success = await updateAllSyncData(allData);
-  console.log('ADLog-Edit: [updateSyncRecord] updateAllSyncData 返回:', success);
-  
-  if (success) {
-    console.log(`✅ 同步记录已更新: ${key}`, record);
-    syncCacheModified[key] = false; // Reset modified flag after successful sync
-  } else {
-    console.warn(`⚠️ 同步失败，数据已保存到本地缓存: ${key}`);
-  }
-
-  console.log('ADLog-Edit: [updateSyncRecord] ========== 结束 ==========');
-  return success;
+  // Use optimized single record update
+  const result = await updateSingleSyncRecord(key, record, options);
+  return result.success;
 }
 
 /**
@@ -1713,6 +1786,7 @@ function renderNextBatch() {
     const card = document.createElement('div');
     card.className = 'card';
     card.dataset.rowIndex = it.idx + 1; // Store original row number (1-based)
+    card.setAttribute('data-item-id', it.id); // Store item ID for quick lookup
     
     // Left: content
     const body = document.createElement('div');
@@ -1915,6 +1989,7 @@ function updateLoadMoreIndicator() {
 }
 
 async function setRating(id, val, rowId, syncStatusElement) {
+  const startTime = performance.now();
   console.log('ADLog-Edit: [setRating] ========== 开始 ==========');
   console.log(`ADLog-Edit: [setRating] id = ${id}`);
   console.log(`ADLog-Edit: [setRating] val = ${val}`);
@@ -1922,9 +1997,20 @@ async function setRating(id, val, rowId, syncStatusElement) {
   console.log(`ADLog-Edit: [setRating] currentFile = ${currentFile}`);
   console.log(`⭐ 开始设置星级: id=${id}, val=${val}, rowId=${rowId}`);
   
+  // Update local ratings immediately (optimistic update)
   ratings[id] = val;
   console.log(`ADLog-Edit: [setRating] 已更新本地 ratings[${id}] = ${val}`);
   
+  // Find the card element to update UI
+  const cardElement = document.querySelector(`[data-item-id="${id}"]`);
+  
+  // Update stars UI immediately (optimistic update)
+  if (cardElement) {
+    updateCardStars(cardElement, id, val);
+    console.log(`ADLog-Edit: [setRating] ✅ UI已立即更新（乐观更新）`);
+  }
+  
+  // Save to localStorage
   if (currentFile) saveRatings(currentFile, ratings);
   
   // Sync to cloud if rowId is provided
@@ -1933,11 +2019,10 @@ async function setRating(id, val, rowId, syncStatusElement) {
     console.log(`ADLog-Edit: [setRating] 生成的 syncKey = ${syncKey}`);
     console.log(`🔑 生成同步key: ${syncKey}`);
     
-    // Get existing record or create new one
+    // Get existing record from cache (no network request)
     console.log(`ADLog-Edit: [setRating] 准备调用 getSyncRecord(${syncKey})...`);
-    let record = await getSyncRecord(syncKey);
+    let record = getSyncRecord(syncKey); // Now synchronous, only checks cache
     console.log(`ADLog-Edit: [setRating] getSyncRecord 返回:`, JSON.stringify(record));
-    console.log(`ADLog-Edit: [setRating] record 的引用地址: ${record ? Object.keys(record).join(',') : 'null'}`);
     
     if (!record) {
       console.log(`ADLog-Edit: [setRating] record 为空，创建新记录`);
@@ -1961,30 +2046,40 @@ async function setRating(id, val, rowId, syncStatusElement) {
       console.log(`ADLog-Edit: [setRating] ✅ 已创建新对象，避免引用问题`);
     }
     
-    // Update to cloud
-    console.log(`ADLog-Edit: [setRating] 准备调用 updateSyncRecord...`);
-    console.log(`☁️  开始调用 updateSyncRecord...`);
-    const success = await updateSyncRecord(syncKey, record);
-    console.log(`ADLog-Edit: [setRating] updateSyncRecord 返回: ${success}`);
-    console.log(`☁️  updateSyncRecord 返回: ${success}`);
+    // Update to cloud using optimized single record update
+    console.log(`ADLog-Edit: [setRating] 准备调用 updateSingleSyncRecord...`);
+    console.log(`☁️  开始调用 updateSingleSyncRecord...`);
+    const result = await updateSingleSyncRecord(syncKey, record);
+    console.log(`ADLog-Edit: [setRating] updateSingleSyncRecord 返回:`, result);
+    console.log(`☁️  updateSingleSyncRecord 返回:`, result);
     
-    if (success && syncStatusElement) {
-      syncStatusElement.className = 'sync-status synced';
-      syncStatusElement.textContent = 'Synced';
-      syncStatusElement.title = '已同步到云端';
-      console.log(`✅ 同步状态已更新为 Synced`);
-    } else if (!success) {
-      console.warn(`⚠️ 同步失败，但本地数据已保存`);
+    // Update sync status UI
+    if (syncStatusElement) {
+      if (result.success) {
+        syncStatusElement.className = 'sync-status synced';
+        syncStatusElement.textContent = 'Synced';
+        syncStatusElement.title = '已同步到云端';
+        console.log(`✅ 同步状态已更新为 Synced`);
+      } else {
+        syncStatusElement.className = 'sync-status not-synced';
+        syncStatusElement.textContent = 'Local';
+        syncStatusElement.title = '未同步到云端';
+        console.warn(`⚠️ 同步失败，状态已更新为 Local`);
+      }
     }
     
-    console.log(`⭐ 星级已更新: ${syncKey} → ${val}星`);
+    const elapsed = performance.now() - startTime;
+    console.log(`⭐ 星级已更新: ${syncKey} → ${val}星 (耗时: ${elapsed.toFixed(2)}ms)`);
+    
+    if (elapsed > 200) {
+      console.warn(`⚠️ 性能警告：星级更新耗时超过 200ms`);
+    }
   } else {
     console.warn(`⚠️ 跳过云端同步: rowId=${rowId}, currentFile=${currentFile}`);
   }
   
   console.log('ADLog-Edit: [setRating] ========== 结束 ==========');
-  // ✅ 修改星级时保持当前滚动位置
-  renderCards({ preservePosition: true });
+  // ✅ 不再刷新整张表格，只更新对应的 UI 元素
 }
 
 // ==================== Theme Management ====================
