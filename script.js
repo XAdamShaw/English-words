@@ -1368,6 +1368,94 @@ let currentBatch = 0; // Current batch index
 const BATCH_SIZE = 100; // Items per batch
 let isLoadingMore = false; // Prevent multiple simultaneous loads
 
+// ✅ 同步按钮管理：记录当前显示的同步按钮
+let currentSyncButton = null; // 当前显示的"⏰"按钮元素
+let currentSyncButtonRowInfo = null; // 当前同步按钮对应的行信息 { rowId: number, csvId: string, word: string }
+
+/**
+ * 显示"⏰"同步按钮
+ * @param {number} rowId - 行号（1-based）
+ * @param {string|number} csvId - CSV中的原始ID
+ * @param {string} word - 单词文本
+ * @param {HTMLElement} speakBtn - 发音按钮元素，用于定位
+ */
+function showSyncButtonForRow(rowId, csvId, word, speakBtn) {
+  // ✅ 隐藏之前的同步按钮（如果存在）
+  if (currentSyncButton && currentSyncButton.parentNode) {
+    currentSyncButton.remove();
+    currentSyncButton = null;
+    currentSyncButtonRowInfo = null;
+  }
+  
+  // ✅ 在当前行的发音按钮右侧20像素位置创建"⏰"同步按钮
+  const syncBtn = document.createElement('button');
+  syncBtn.className = 'sync-btn';
+  syncBtn.innerHTML = '⏰';
+  syncBtn.title = '同步最新学习位置';
+  syncBtn.setAttribute('aria-label', '同步位置');
+  syncBtn.style.cssText = `
+    margin-left: 20px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 1.2em;
+    padding: 0;
+    line-height: 1;
+  `;
+  
+  // 保存当前行信息
+  currentSyncButtonRowInfo = { rowId, csvId: String(csvId), word };
+  currentSyncButton = syncBtn;
+  
+  // ✅ 点击"⏰"按钮时调用接口
+  syncBtn.addEventListener('click', async (e) => {
+    e.stopPropagation(); // Prevent card click events
+    
+    if (!currentSyncButtonRowInfo) {
+      console.warn('⚠️ [同步按钮] 行信息丢失');
+      return;
+    }
+    
+    const { rowId: syncRowId, csvId: syncCsvId, word: syncWord } = currentSyncButtonRowInfo;
+    
+    console.log(`⏰ [同步按钮] 准备调用 updateLastViewedRow: rowId=${syncRowId}, csvId=${syncCsvId}, word=${syncWord}`);
+    
+    // 禁用按钮，防止重复点击
+    syncBtn.disabled = true;
+    syncBtn.style.opacity = '0.5';
+    syncBtn.style.cursor = 'not-allowed';
+    
+    try {
+      const success = await updateLastViewedRow(syncRowId, syncCsvId, syncWord);
+      
+      if (success) {
+        console.log(`⏰ [同步按钮] 同步成功，隐藏按钮`);
+        // 同步成功后隐藏按钮
+        if (syncBtn.parentNode) {
+          syncBtn.remove();
+        }
+        currentSyncButton = null;
+        currentSyncButtonRowInfo = null;
+      } else {
+        console.warn(`⏰ [同步按钮] 同步失败，恢复按钮状态`);
+        // 恢复按钮状态
+        syncBtn.disabled = false;
+        syncBtn.style.opacity = '1';
+        syncBtn.style.cursor = 'pointer';
+      }
+    } catch (error) {
+      console.error('⏰ [同步按钮] 同步异常:', error);
+      // 恢复按钮状态
+      syncBtn.disabled = false;
+      syncBtn.style.opacity = '1';
+      syncBtn.style.cursor = 'pointer';
+    }
+  });
+  
+  // ✅ 在发音按钮后面添加同步按钮
+  speakBtn.parentNode.insertBefore(syncBtn, speakBtn.nextSibling);
+}
+
 // ==================== Speech Synthesis Functions ====================
 /**
  * Check if SpeechSynthesis API is supported
@@ -2289,6 +2377,41 @@ function renderNextBatch() {
       : it.idx;
     rowNum.textContent = `#${parseInt(rowId) + 1}`;
     
+    // ✅ 添加点击事件：点击行号时显示"⏰"同步按钮
+    // 注意：speakBtn 在后面才创建，所以需要延迟绑定
+    rowNum.style.cursor = 'pointer';
+    rowNum.title = '点击同步此行的学习位置';
+    rowNum.addEventListener('click', (e) => {
+      e.stopPropagation(); // Prevent card click events
+      
+      try {
+        const csvId = it.row['id'] !== undefined && it.row['id'] !== null && it.row['id'] !== '' 
+          ? it.row['id'] 
+          : it.idx;
+        const actualRowId = it.idx + 1; // 1-based row number
+        const word = getCell('word');
+        
+        // 查找当前行的发音按钮（如果存在）
+        const currentCard = e.target.closest('.card');
+        if (!currentCard) {
+          console.warn('⚠️ [行号点击] 未找到卡片元素');
+          return;
+        }
+        
+        // 在当前卡片中查找发音按钮
+        const speakBtnInCard = currentCard.querySelector('.speak-btn');
+        if (!speakBtnInCard) {
+          console.warn('⚠️ [行号点击] 未找到发音按钮，可能不支持语音');
+          return;
+        }
+        
+        // 显示"⏰"同步按钮
+        showSyncButtonForRow(actualRowId, csvId, word, speakBtnInCard);
+      } catch (error) {
+        console.error('行号点击处理异常:', error);
+      }
+    });
+    
     // Sync status indicator
     const syncStatus = document.createElement('span');
     syncStatus.className = 'sync-status unknown';
@@ -2330,33 +2453,19 @@ function renderNextBatch() {
         speakBtn.title = '朗读单词';
         speakBtn.setAttribute('aria-label', '朗读');
         
-        speakBtn.addEventListener('click', async (e) => {
+        speakBtn.addEventListener('click', (e) => {
           e.stopPropagation(); // Prevent card click events
           
           try {
             const textToSpeak = getCell('word');
-            // ✅ 使用CSV中的原始id字段值，而不是文件名拼接的ID
-            const csvId = it.row['id'] !== undefined && it.row['id'] !== null && it.row['id'] !== '' 
-              ? it.row['id'] 
-              : it.idx;
-            const rowId = it.idx + 1; // 1-based row number
-            
-            // Start speaking immediately (optimistic)
+            // Start speaking immediately
             speakText(textToSpeak, speakBtn);
-            
-            // Update last viewed row (async, non-blocking)
-            // ✅ 总是调用接口，因为这是跨设备功能
-            console.log(`🔊 [发音按钮] 准备调用 updateLastViewedRow: rowId=${rowId}, csvId=${csvId}, word=${textToSpeak}`);
-            updateLastViewedRow(rowId, csvId, textToSpeak).then(success => {
-              console.log(`🔊 [发音按钮] updateLastViewedRow 完成: success=${success}`);
-            }).catch(error => {
-              console.error('🔊 [发音按钮] 更新浏览位置失败:', error);
-            });
           } catch (error) {
             console.error('朗读按钮点击处理异常:', error);
           }
         });
         
+        // 添加发音按钮到DOM
         cols23Wrapper.appendChild(speakBtn);
       }
       
